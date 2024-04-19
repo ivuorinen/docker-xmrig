@@ -1,0 +1,12 @@
+version: "3.8"
+services:
+  xmrig:
+    image: ivuorinen/docker-xmrig:latest
+    container_name: xmrig
+    #environment:
+    #  - TZ=Europe/Amsterdam
+    volumes:
+      - ./config.json:/xmrig/etc/config.json:ro
+      - ./log:/xmrig/log
+    command: ["/xmrig/xmrig", "--config=/xmrig/etc/config.json"]
+    restart: unless-stopped
