@@ -1,4 +1,4 @@
-name: Build
+name: Build and release
 
 on:
   workflow_dispatch:
@@ -9,6 +9,8 @@ on:
       - ".editorconfig"
       - "deployment.yaml"
       - "renovate.json"
+    tags:
+      - "*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
@@ -101,6 +103,7 @@ jobs:
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
   update_description:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     continue-on-error: true
     needs:
