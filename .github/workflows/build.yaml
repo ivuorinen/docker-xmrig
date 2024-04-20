@@ -63,12 +63,6 @@ jobs:
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
-      - name: Push image to GHCR
-        continue-on-error: true
-        run: |
-          docker buildx imagetools create \
-            --tag ghcr.io/${{ env.REGISTRY_IMAGE }}:latest \
-            ${{ env.REGISTRY_IMAGE }}:latest
 
   merge:
     runs-on: ubuntu-latest
