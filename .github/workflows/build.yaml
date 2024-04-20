@@ -10,6 +10,10 @@ on:
       - "deployment.yaml"
       - "renovate.json"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY_IMAGE: ivuorinen/docker-xmrig
 
