@@ -7,7 +7,8 @@ ENV TZ=Europe/Helsinki
 ENV PATH=/xmrig:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV XMRIG_URL=https://github.com/xmrig/xmrig.git
 
-RUN apt-get update && \
+RUN DEBIAN_FRONTEND=noninteractive \
+    apt-get update && \
     apt-get -y install git build-essential cmake libuv1-dev libssl-dev libhwloc-dev
 
 RUN git clone ${XMRIG_URL} /xmrig && \
@@ -35,7 +36,8 @@ WORKDIR /xmrig
 
 COPY --from=prepare /xmrig/build/conf/config.json /xmrig/config.json
 COPY --from=prepare /xmrig/build/xmrig /xmrig/xmrig
-RUN apt-get update \
+RUN DEBIAN_FRONTEND=noninteractive \
+    apt-get update \
     && apt-get -y --no-install-recommends install libuv1 libhwloc15 \
     && apt-get purge -y --auto-remove \
     && rm -rf /var/lib/apt/lists/* \
