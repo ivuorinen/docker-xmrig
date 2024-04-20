@@ -1,9 +1,14 @@
 name: Build
 
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - "main"
+    paths-ignore:
+      - ".github/**"
+      - "LICENSE"
+      - ".editorconfig"
+      - "deployment.yaml"
+      - "renovate.json"
 
 env:
   REGISTRY_IMAGE: ivuorinen/docker-xmrig
@@ -58,6 +63,12 @@ jobs:
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
+      - name: Push image to GHCR
+        continue-on-error: true
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ env.REGISTRY_IMAGE }}:latest \
+            ${{ env.REGISTRY_IMAGE }}:latest
 
   merge:
     runs-on: ubuntu-latest
@@ -90,7 +101,15 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
-      - name: Update repo description
+
+  update_description:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs:
+      - merge
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update DockerHub repo description
         uses: peter-evans/dockerhub-description@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
