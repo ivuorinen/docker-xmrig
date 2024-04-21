@@ -10,3 +10,7 @@ services:
       - ./log:/xmrig/log
     command: ["/xmrig/xmrig", "--config=/xmrig/etc/config.json"]
     restart: unless-stopped
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
