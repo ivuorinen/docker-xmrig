@@ -1,16 +1,5 @@
 {
-  "api": {
-    "id": null,
-    "worker-id": null
-  },
-  "http": {
-    "enabled": false,
-    "host": "127.0.0.1",
-    "port": 0,
-    "access-token": null,
-    "restricted": true
-  },
-  "autosave": false,
+  "autosave": true,
   "background": false,
   "colors": true,
   "title": true,
@@ -21,35 +10,24 @@
     "1gb-pages": true,
     "rdmsr": true,
     "wrmsr": true,
-    "cache_qos": false,
+    "cache_qos": true,
     "numa": true,
     "scratchpad_prefetch_mode": 1
   },
   "cpu": {
     "enabled": true,
     "huge-pages": true,
-    "huge-pages-jit": false,
-    "hw-aes": null,
-    "priority": null,
-    "memory-pool": false,
-    "yield": true,
-    "max-threads-hint": 100
+    "yield": true
   },
   "opencl": {
     "enabled": false,
     "cache": true,
-    "loader": null,
-    "platform": "AMD",
-    "adl": true,
-    "cn/0": false,
-    "cn-lite/0": false
+    "loader": null
   },
   "cuda": {
     "enabled": false,
     "loader": null,
-    "nvml": true,
-    "cn/0": false,
-    "cn-lite/0": false
+    "nvml": true
   },
   "donate-level": 0,
   "donate-over-proxy": 0,
@@ -59,9 +37,7 @@
       "url": "tunkki:3333",
       "user": "${HOSTNAME}",
       "pass": "",
-      "keepalive": true,
-      "nicehash": false,
-      "variant": "trtl"
+      "keepalive": true
     }
   ],
   "print-time": 60,
@@ -71,13 +47,7 @@
   "retry-pause": 5,
   "syslog": true,
   "tls": {
-    "enabled": false,
-    "protocols": null,
-    "cert": null,
-    "cert_key": null,
-    "ciphers": null,
-    "ciphersuites": null,
-    "dhparam": null
+    "enabled": false
   },
   "user-agent": null,
   "verbose": 0,

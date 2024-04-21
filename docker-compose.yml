@@ -6,7 +6,7 @@ services:
     #environment:
     #  - TZ=Europe/Amsterdam
     volumes:
-      - ./config.json:/xmrig/etc/config.json:ro
+      - ./config.json:/xmrig/etc/config.json:rw
       - ./log:/xmrig/log
     command: ["/xmrig/xmrig", "--config=/xmrig/etc/config.json"]
     restart: unless-stopped
