@@ -29,9 +29,9 @@
     "loader": null,
     "nvml": true
   },
+  "log-file": "/log/xmrig.log",
   "donate-level": 0,
   "donate-over-proxy": 0,
-  "log-file": "/xmrig/log/xmrig.log",
   "pools": [
     {
       "url": "tunkki:3333",

@@ -1,4 +1,3 @@
-version: "3.8"
 services:
   xmrig:
     image: ivuorinen/docker-xmrig:latest
@@ -6,9 +5,8 @@ services:
     #environment:
     #  - TZ=Europe/Amsterdam
     volumes:
-      - ./config.json:/xmrig/etc/config.json:rw
-      - ./log:/xmrig/log
-    command: ["/xmrig/xmrig", "--config=/xmrig/etc/config.json"]
+      - ./config.json:/etc/xmrig/config.json:rw
+      - ./log:/xmrig/log:rw
     restart: unless-stopped
   watchtower:
     image: containrrr/watchtower
