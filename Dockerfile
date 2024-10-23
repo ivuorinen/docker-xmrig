@@ -1,6 +1,6 @@
 # Stage 1: Build stage
 ARG ALPINE_VERSION="3.20"
-ARG XMRIG_VERSION="v6.22.0"
+ARG XMRIG_VERSION="v6.22.1"
 
 FROM alpine:${ALPINE_VERSION} AS builder
 
