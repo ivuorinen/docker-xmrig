@@ -1,7 +1,7 @@
 # Stage 1: Build stage
 ARG XMRIG_VERSION="v6.22.2"
 
-FROM alpine:3.20 AS builder
+FROM alpine:3.21 AS builder
 
 # Install build dependencies
 RUN echo 'https://dl-cdn.alpinelinux.org/alpine/edge/community' >> /etc/apk/repositories && \
@@ -19,7 +19,7 @@ WORKDIR /xmrig/build
 RUN cmake .. -DWITH_OPENCL=OFF -DWITH_CUDA=OFF && make -j$(nproc)
 
 # Stage 2
-FROM alpine:3.20
+FROM alpine:3.21
 
 ARG XMRIG_VERSION
 ARG BUILD_DATE
