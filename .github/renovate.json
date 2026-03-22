@@ -1,6 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "github>ivuorinen/renovate-config"
-  ]
+  "extends": ["github>ivuorinen/renovate-config"]
 }
