@@ -1,0 +1,5 @@
+ignored:
+  # DL3018 wants `apk add pkg=version`. Alpine drops old package versions from the
+  # repositories on every refresh, so a pinned apk line breaks the build the first
+  # time upstream rebuilds. The base image tag (alpine:3.24) is the pin that holds.
+  - DL3018

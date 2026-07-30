@@ -1,0 +1,11 @@
+# Only config.json and NOTICE are COPYed into the image; everything else here is
+# build-context weight (.git is 55 commits of history, uploaded on every build,
+# for both matrix platforms).
+.git
+.github
+.editorconfig
+docs
+log
+*.md
+docker-compose.yml
+deployment.yaml

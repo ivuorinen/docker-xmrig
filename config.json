@@ -1,5 +1,5 @@
 {
-  "autosave": true,
+  "autosave": false,
   "background": false,
   "colors": true,
   "title": true,
@@ -7,10 +7,10 @@
     "init": -1,
     "init-avx2": -1,
     "mode": "auto",
-    "1gb-pages": true,
-    "rdmsr": true,
-    "wrmsr": true,
-    "cache_qos": true,
+    "1gb-pages": false,
+    "rdmsr": false,
+    "wrmsr": false,
+    "cache_qos": false,
     "numa": true,
     "scratchpad_prefetch_mode": 1
   },
@@ -29,12 +29,19 @@
     "loader": null,
     "nvml": true
   },
+  "http": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8080,
+    "access-token": null,
+    "restricted": true
+  },
   "log-file": "/log/xmrig.log",
   "donate-level": 0,
   "donate-over-proxy": 0,
   "pools": [
     {
-      "url": "tunkki:3333",
+      "url": "CHANGE-ME.example:3333",
       "user": "${HOSTNAME}",
       "pass": "",
       "keepalive": true
@@ -45,7 +52,7 @@
   "dmi": true,
   "retries": 5,
   "retry-pause": 5,
-  "syslog": true,
+  "syslog": false,
   "tls": {
     "enabled": false
   },

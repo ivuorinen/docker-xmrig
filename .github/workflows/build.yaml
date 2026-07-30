@@ -2,13 +2,10 @@ name: Build and release
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
-    paths-ignore:
-      - ".github/**"
-      - "LICENSE"
-      - ".editorconfig"
-      - "deployment.yaml"
-      - "renovate.json"
+    branches:
+      - main
     tags:
       - "*"
 
@@ -16,12 +13,67 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
   cancel-in-progress: true
 
+# None of these jobs writes to the repository; the pipeline's real credential is
+# the Docker Hub token.
+permissions:
+  contents: read
+
 env:
   REGISTRY_IMAGE: ivuorinen/docker-xmrig
 
 jobs:
-  build:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: Dockerfile
+
+  # Gates publication. Builds amd64 natively, then actually runs the binary —
+  # this is what catches an empty XMRIG_VERSION, a broken donate.h patch, or a
+  # runtime shared-library break, none of which a manifest inspection can see.
+  verify:
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build for test
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: xmrig:ci
+      - name: Smoke test
+        run: |
+          expected="$(sed -n 's/^ARG XMRIG_VERSION="v\{0,1\}\([^"]*\)"/\1/p' Dockerfile)"
+          test -n "$expected" || { echo "could not read XMRIG_VERSION from Dockerfile"; exit 1; }
+          out="$(docker run --rm xmrig:ci /bin/xmrig --version)"
+          echo "$out"
+          echo "$out" | grep -q "$expected" || {
+            echo "::error::built binary is not XMRig $expected — check the builder-stage ARG"
+            exit 1
+          }
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: xmrig:ci
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+  build:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs:
+      - verify
     strategy:
       fail-fast: false
       matrix:
@@ -31,8 +83,8 @@ jobs:
     steps:
       - name: Prepare
         run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          platform="${{ matrix.platform }}"
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Docker meta
@@ -96,6 +148,7 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
+          # shellcheck disable=SC2046  # word splitting is the point: one -t per tag
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
       - name: Inspect image
@@ -105,7 +158,6 @@ jobs:
   update_description:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
-    continue-on-error: true
     needs:
       - merge
     steps:

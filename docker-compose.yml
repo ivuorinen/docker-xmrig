@@ -1,14 +1,24 @@
 services:
   xmrig:
     image: ivuorinen/docker-xmrig:latest
-    container_name: xmrig
     #environment:
     #  - TZ=Europe/Amsterdam
     volumes:
-      - ./config.json:/etc/xmrig/config.json:rw
-      - ./log:/xmrig/log:rw
+      # :ro is safe because config.json sets "autosave": false.
+      - ./config.json:/etc/xmrig/config.json:ro
+      # Must be /log — that is where the image creates the directory and where
+      # config.json points "log-file".
+      - ./log:/log:rw
     restart: unless-stopped
-  watchtower:
-    image: containrrr/watchtower
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+    # Without limits the miner takes every core on the host, indefinitely. Raise
+    # deliberately; this matches the ceiling in deployment.yaml.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
