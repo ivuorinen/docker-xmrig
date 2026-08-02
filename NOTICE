@@ -3,7 +3,8 @@ NOTICE
 
 This repository's own packaging — the Dockerfile, the Kubernetes and Compose
 manifests, the configuration, and the documentation — is licensed under the MIT
-License; see LICENSE.
+License; see LICENSE at the repository root, shipped inside the image as
+LICENSE.packaging-MIT alongside this file.
 
 The container image built from this repository is a different thing, and is NOT
 MIT licensed.
@@ -33,14 +34,17 @@ The complete corresponding source is:
   * upstream XMRig at the tag recorded in the image's
     org.opencontainers.image.version label, from
     https://github.com/xmrig/xmrig ; plus
-  * the modification above, which is the build recipe in this repository's
-    Dockerfile.
+  * the build recipe that applies the modification above, in the Dockerfile at
+    https://github.com/ivuorinen/docker-xmrig
+    (also recorded in the image's org.opencontainers.image.source label; the
+    exact revision is in org.opencontainers.image.revision).
 
 Both travel inside the image itself, under /usr/share/licenses/xmrig/ :
 
-    LICENSE    — upstream XMRig GPL-3.0 licence text
-    donate.h   — the modified file, as compiled
-    NOTICE     — this file
+    LICENSE.xmrig-GPL-3.0   — upstream XMRig GPL-3.0 licence text
+    LICENSE.packaging-MIT   — this repository's MIT licence, for the packaging
+    donate.h                — the modified file, as compiled
+    NOTICE                  — this file
 
 Attribution
 -----------

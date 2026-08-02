@@ -24,6 +24,7 @@ env:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,14 +32,34 @@ jobs:
         uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
         with:
           dockerfile: Dockerfile
+      # Runs shellcheck over every `run:` block, which is what the
+      # `# shellcheck disable=SC2046` directive in the merge job assumes exists.
+      # The release pipeline's shell is where a quoting mistake silently
+      # mis-tags a published image, so it is worth gating.
+      - name: Lint workflows
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
+        with:
+          args: -color
 
-  # Gates publication. Builds amd64 natively, then actually runs the binary —
-  # this is what catches an empty XMRIG_VERSION, a broken donate.h patch, or a
-  # runtime shared-library break, none of which a manifest inspection can see.
+  # Gates publication. Builds each published platform on a native runner, then
+  # actually runs the binary — this is what catches an empty XMRIG_VERSION, a
+  # broken donate.h patch, or a runtime shared-library break, none of which a
+  # manifest inspection can see. Both platforms in `build` must appear here, or
+  # half the manifest list ships with only the check this comment calls
+  # insufficient.
   verify:
-    runs-on: ubuntu-latest
     needs:
       - lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,19 +69,58 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           load: true
           tags: xmrig:ci
+          # The xmrig compile is the entire cost of this image (~2 min at -j8,
+          # several on a hosted runner); everything else is seconds. `build`
+          # reuses this via the same scope, so a release compiles twice rather
+          # than four times. Per-platform scope is required — without it the two
+          # matrix legs share one key and evict each other every run.
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
       - name: Smoke test
         run: |
           expected="$(sed -n 's/^ARG XMRIG_VERSION="v\{0,1\}\([^"]*\)"/\1/p' Dockerfile)"
           test -n "$expected" || { echo "could not read XMRIG_VERSION from Dockerfile"; exit 1; }
           out="$(docker run --rm xmrig:ci /bin/xmrig --version)"
           echo "$out"
-          echo "$out" | grep -q "$expected" || {
-            echo "::error::built binary is not XMRig $expected — check the builder-stage ARG"
+          # Exact field comparison, not `grep -q "$expected"`: the version
+          # contains dots that a regex treats as wildcards, and an unanchored
+          # match would accept 6.22.21 as "6.22.2".
+          actual="$(printf '%s\n' "$out" | awk '$1 == "XMRig" { print $2; exit }')"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::built binary is XMRig '${actual}', expected '${expected}' — check the builder-stage ARG"
+            exit 1
+          fi
+      # `--version` overrides CMD, so the above never reads config.json, never
+      # starts the HTTP API and never exercises the HEALTHCHECK. This does: it
+      # runs the image exactly as shipped and pins the parts deployment.yaml's
+      # probes and the Dockerfile's HEALTHCHECK depend on.
+      - name: Smoke test the image as shipped
+        run: |
+          cid="$(docker run -d xmrig:ci)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 30); do
+            docker exec "$cid" sh -c 'wget -qO- http://127.0.0.1:8080/2/summary' \
+              >/tmp/summary.json 2>/dev/null && break
+            sleep 1
+          done
+          if [ ! -s /tmp/summary.json ]; then
+            echo "::error::image did not serve /2/summary within 30s — config.json rejected, or built without WITH_HTTP"
+            docker logs "$cid"
+            exit 1
+          fi
+          # xmrig pretty-prints its JSON, so match whitespace-tolerantly rather
+          # than assuming a compact `"restricted":true`.
+          grep -qE '"restricted"[[:space:]]*:[[:space:]]*true' /tmp/summary.json || {
+            echo "::error::HTTP API is not in restricted mode"
+            cat /tmp/summary.json
             exit 1
           }
+          # the container's own HEALTHCHECK command, run verbatim
+          docker exec "$cid" sh -c 'wget -qO- http://127.0.0.1:8080/2/summary >/dev/null 2>&1' || {
+            echo "::error::HEALTHCHECK command failed inside the image"; exit 1; }
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -71,15 +131,21 @@ jobs:
 
   build:
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
     needs:
       - verify
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    # Native runners for both platforms — no QEMU. Emulating an xmrig compile
+    # cost most of the tag build's wall clock, and `verify` needs a native
+    # runner anyway to execute the arm64 binary it checks.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - name: Prepare
         run: |
@@ -87,13 +153,25 @@ jobs:
           echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read XMRig version
+        id: xmrig
+        run: |
+          v="$(sed -n 's/^ARG XMRIG_VERSION="\([^"]*\)"/\1/p' Dockerfile)"
+          test -n "$v" || { echo "could not read XMRIG_VERSION from Dockerfile"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      # metadata-action's DEFAULT labels include org.opencontainers.image.licenses
+      # (the repo's MIT licence) and .version (the git tag), and labels passed to
+      # buildx override the Dockerfile's LABEL. Left to its defaults it publishes a
+      # GPL-conveying image labelled MIT, and points NOTICE's corresponding-source
+      # pointer at a tag that does not exist upstream. Both are pinned here.
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY_IMAGE }}
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+          labels: |
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+            org.opencontainers.image.version=${{ steps.xmrig.outputs.version }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Login to Docker Hub
@@ -108,6 +186,11 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Same scope `verify` wrote, so this reuses that compile instead of
+          # repeating it. Cache lookup keys on the RUN command strings, and the
+          # clone step includes the XMRIG_COMMIT check — so a moved upstream tag
+          # still busts the cache rather than being served from it.
+          cache-from: type=gha,scope=${{ matrix.platform }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
       - name: Export digest
         run: |
@@ -124,6 +207,7 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs:
       - build
     steps:
@@ -149,7 +233,8 @@ jobs:
         working-directory: /tmp/digests
         run: |
           # shellcheck disable=SC2046  # word splitting is the point: one -t per tag
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
       - name: Inspect image
         run: |
@@ -158,6 +243,7 @@ jobs:
   update_description:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs:
       - merge
     steps:

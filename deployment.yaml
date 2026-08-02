@@ -44,14 +44,40 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
+              # Dropping IPC_LOCK also disables config.json's `cpu.huge-pages`
+              # (worth ~20-30% of RandomX hashrate). Deliberate: re-adding it,
+              # plus a hugepages-2Mi limit and a node with pre-allocated pages,
+              # is an opt-in — see the Performance tuning table in README.md.
               drop: ["ALL"]
           resources:
             limits:
-              memory: "2Gi"
+              # RandomX fast mode allocates a FIXED 2336 MiB (2080 MiB dataset +
+              # 256 MiB cache) and sizes that from HOST memory, not from this
+              # cgroup limit — so it allocates the same amount whatever is set
+              # here. At 2Gi (2048 MiB) it is 288 MiB short and the container is
+              # OOM-killed during dataset init (verified: exit 137); kubelet
+              # nodes run without swap, so there is no degraded mode to fall
+              # back into. Do not lower this without also setting
+              # `"mode": "light"` in config.json's randomx block.
+              memory: "3Gi"
               cpu: "1"
+              # Bounds the log emptyDir below. Without it an opted-in xmrig.log
+              # grows against the NODE's filesystem until the kubelet hits its
+              # eviction threshold and starts evicting unrelated pods.
+              ephemeral-storage: "512Mi"
             requests:
-              memory: "1Gi"
+              # Must equal the limit. A smaller request lets the scheduler place
+              # this pod on a node that cannot satisfy the 2336 MiB it will go on
+              # to allocate, turning a scheduling success into an OOM kill.
+              memory: "3Gi"
+              # NOTE: this is a CFS quota, not a CPU set. xmrig reads the host
+              # topology via hwloc and cannot see it, so it still starts one
+              # mining thread per host core and schedules them all into this one
+              # CPU of quota. To actually bound the thread count, either run the
+              # kubelet with --cpu-manager-policy=static (integer limits then
+              # become exclusive cores), or pin threads in config.json.
               cpu: "1"
+              ephemeral-storage: "512Mi"
           # Liveness/readiness only: these catch a wedged or unresponsive process.
           # They do NOT detect a disconnected pool — the API answers at zero
           # hashrate, so a pod can still be Ready while mining nothing. Alert on
@@ -73,7 +99,9 @@ spec:
             # Must be /etc/xmrig — the image's CMD reads /etc/xmrig/config.json.
             - name: config-volume
               mountPath: /etc/xmrig
-            # readOnlyRootFilesystem needs a writable mount for the log file.
+            # readOnlyRootFilesystem needs a writable mount if you add
+            # "log-file": "/log/xmrig.log" back to config.json. The shipped
+            # config logs to stdout only, which the cluster already rotates.
             - name: log
               mountPath: /log
       volumes:
@@ -81,4 +109,35 @@ spec:
           configMap:
             name: xmrig-config
         - name: log
-          emptyDir: {}
+          # xmrig does not rotate its log file. sizeLimit makes the kubelet evict
+          # THIS pod rather than let it fill the node out from under everything
+          # else scheduled there.
+          emptyDir:
+            sizeLimit: 512Mi
+---
+# The xmrig HTTP API on :8080 has no access token and must listen on 0.0.0.0 for
+# the kubelet to reach it. Unrestricted, any pod in the cluster can read the
+# host's CPU model, its total and free memory, this pod's hostname, and — once
+# connected — the pool user, which for a normal Monero deployment is the payout
+# address. Kubelet probe traffic originates on the node and is not subject to
+# NetworkPolicy, so denying pod ingress outright keeps the probes working.
+#
+# REQUIRES A CNI THAT ENFORCES NETWORKPOLICY (Calico, Cilium, Antrea, Weave, or a
+# managed equivalent). NetworkPolicy is enforced by the network plugin, not by
+# Kubernetes: plain Flannel and kindnet accept this object and silently ignore
+# it. `kubectl get networkpolicy` showing the object is NOT evidence it is doing
+# anything. Verify with an actual connectivity test from another pod:
+#   kubectl run np-probe --rm -it --restart=Never --image=busybox -n xmrig -- \
+#     wget -qO- --timeout=5 http://<pod-ip>:8080/2/summary && echo "NOT ENFORCED"
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: xmrig-deny-ingress
+  namespace: xmrig
+spec:
+  podSelector:
+    matchLabels:
+      app: xmrig
+  policyTypes:
+    - Ingress
+  ingress: []

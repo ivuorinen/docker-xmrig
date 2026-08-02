@@ -1,5 +1,13 @@
 ignored:
-  # DL3018 wants `apk add pkg=version`. Alpine drops old package versions from the
-  # repositories on every refresh, so a pinned apk line breaks the build the first
-  # time upstream rebuilds. The base image tag (alpine:3.24) is the pin that holds.
+  # DL3018 wants `apk add pkg=version`. Alpine garbage-collects old package
+  # versions from its repositories, so a pinned apk line breaks the build the
+  # first time upstream rebuilds.
+  #
+  # What this costs, stated honestly: the base LAYER is digest-pinned, but `apk
+  # add` fetches from the live repository at build time, so the runtime stage's
+  # libuv/hwloc/libssl3 are NOT reproducible across rebuilds of the same commit —
+  # they track the 3.24 branch. The digest pin does not cover them. That is the
+  # intended trade (security patches arrive without a Dockerfile edit), and it is
+  # why `verify` re-scans the built image with trivy on every run rather than
+  # trusting a previous scan.
   - DL3018

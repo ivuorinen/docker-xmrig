@@ -1,22 +1,41 @@
 services:
   xmrig:
     image: ivuorinen/docker-xmrig:latest
-    #environment:
-    #  - TZ=Europe/Amsterdam
+    # environment:
+    #   - TZ=Europe/Amsterdam
+    # Same hardening deployment.yaml applies. Safe as configured: config.json is
+    # mounted :ro with "autosave": false, and /log below is a separate writable
+    # bind mount, so nothing needs a writable root filesystem.
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
     volumes:
       # :ro is safe because config.json sets "autosave": false.
       - ./config.json:/etc/xmrig/config.json:ro
-      # Must be /log — that is where the image creates the directory and where
-      # config.json points "log-file".
+      # Only used if you add "log-file": "/log/xmrig.log" back to config.json.
+      # Run `sudo chown 10001 ./log` first: the container is uid 10001, ./log
+      # comes out of `git clone` owned by you, and xmrig reports NOTHING when it
+      # cannot open the log file — it just never writes one. xmrig also does not
+      # rotate that file. stdout below is captured and rotated for you.
       - ./log:/log:rw
     restart: unless-stopped
+    # A CPU *set*, not a quota. `cpus: "1"` caps CPU time but xmrig reads the host
+    # topology through hwloc and cannot see a quota, so it would still start one
+    # mining thread per host core and cram them all into that quota. hwloc does
+    # honour the affinity mask, so cpuset is what actually bounds the thread count.
+    # Widen to e.g. "0-3" to mine on more cores.
+    cpuset: "0"
     # Without limits the miner takes every core on the host, indefinitely. Raise
     # deliberately; this matches the ceiling in deployment.yaml.
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 2G
+          # 3G, not 2G: RandomX fast mode allocates a fixed 2336 MiB (2080 MiB
+          # dataset + 256 MiB cache). At 2G the container does not fail cleanly —
+          # Docker allows 2x swap by default, so it thrashes at roughly 1/4500 of
+          # its hashrate while still reporting healthy.
+          memory: 3G
     logging:
       driver: json-file
       options:
