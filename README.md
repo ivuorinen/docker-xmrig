@@ -40,7 +40,7 @@ relying on it:
 
 ```bash
 kubectl run np-probe --rm -it --restart=Never --image=busybox -n xmrig -- \
-  wget -qO- --timeout=5 http://<pod-ip>:8080/2/summary && echo "NOT ENFORCED"
+  wget -qO- -T 5 http://<pod-ip>:8080/2/summary && echo "NOT ENFORCED"
 ```
 
 Under Compose the port is not published, so keep the miner off any network you
@@ -148,9 +148,12 @@ want to modify include:
   repo rather than running `:latest`.
 - `replicas`: number of desired pods to be running. One pod is scheduled per
   node (see `affinity`), so this is capped by your node count.
-- `resources`: set appropriate values for `cpu` and `memory` requests/limits —
-  but read the memory floor in [Performance tuning](#performance-tuning) before
-  lowering `memory`.
+- `resources`: RandomX fast mode needs
+  `requests.memory == limits.memory >= 3Gi`. They must be **equal**: a smaller
+  request lets the scheduler place the pod on a node that cannot satisfy the
+  2336 MiB the miner then allocates, and the pod is OOM-killed after it has
+  already been admitted. See [Performance tuning](#performance-tuning) before
+  changing `memory`.
 - `affinity`: the manifest schedules only one pod per node. If that is not what
   you want, remove the `affinity` block.
 
@@ -240,15 +243,41 @@ wget -qO- http://<pod>:8080/2/summary \
   | jq -e '.connection.pool != "" and (.hashrate.total[0] // 0) > 0'
 ```
 
+**On Kubernetes that scrape is blocked by default.** The `NetworkPolicy` in
+`deployment.yaml` denies *all* pod ingress. Kubelet probes are unaffected —
+they originate on the node — but a monitoring client running in another pod is
+not, so the check above will time out no matter how the miner is doing. Grant
+your collector an explicit exception, rather than dropping the policy:
+
+```yaml
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8080
+```
+
+Scrape from outside the cluster only if you have read the API exposure note
+above and accepted it — the endpoint has no access token.
+
 xmrig exports no Prometheus endpoint, so use a small exporter or a blackbox check
 over that same JSON. Pick a threshold that suits your pool's reliability — which
 is why one is not hardcoded here.
 
 ### Persistent logging
 
-The shipped `config.json` logs to stdout only. That is deliberate: `docker logs`
-and `kubectl logs` are rotated for you, and the Compose file caps the stdout log
-at 3 x 10 MB.
+The shipped `config.json` logs to stdout only. That is deliberate — but "stdout
+is rotated for you" is only true where something is actually configured to
+rotate it:
+
+| Path | Rotation |
+| --- | --- |
+| Compose | Capped at 3 x 10 MB — `docker-compose.yml` sets `max-size`/`max-file`. |
+| `docker run` | **None by default.** The `json-file` driver grows without bound unless you pass `--log-opt max-size=10m --log-opt max-file=3` or set them in `daemon.json`. |
+| Kubernetes | Depends on the kubelet's `containerLogMaxSize`/`containerLogMaxFiles` (commonly 10Mi x 5, but not guaranteed). |
 
 To keep a file copy on the host instead, add the `log-file` key back and
 bind-mount the directory it points at:
@@ -262,10 +291,19 @@ mkdir -p "$(pwd)"/log
 sudo chown 10001 "$(pwd)"/log   # required — see below
 ```
 
-Both `/log` mounts are already wired: [`docker-compose.yml`][docker-compose.yml]
-bind-mounts `./log`, and `deployment.yaml` mounts a 512 MiB `emptyDir` (replace
-it with a [Persistent Volume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
+The Compose and Kubernetes `/log` mounts are already wired:
+[`docker-compose.yml`][docker-compose.yml] bind-mounts `./log`, and
+`deployment.yaml` mounts a 512 MiB `emptyDir` (replace it with a
+[Persistent Volume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
 to survive rescheduling).
+
+The standalone `docker run` recipe above mounts only `config.json`, so add the
+volume there yourself — without it xmrig writes the log inside the container's
+own filesystem, where it is lost on `--rm` and invisible on the host:
+
+```bash
+    --volume "$(pwd)"/log:/log:rw \
+```
 
 Two things to know before you opt in:
 

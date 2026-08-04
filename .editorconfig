@@ -11,3 +11,10 @@ insert_final_newline = true
 max_line_length = 120
 indent_style = space
 indent_size = 2
+
+# Markdown table rows cannot be wrapped — a newline inside a cell ends the row.
+# Prose in .md files should still stay near 120; this only stops the tables in
+# README.md and docs/audit/ from being a permanent, ignored violation of the
+# rule above. Better an explicit exemption than a rule everyone knows is broken.
+[*.md]
+max_line_length = off

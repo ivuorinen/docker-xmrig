@@ -1,7 +1,8 @@
 # Architecture Profile
 
-Detected by `/nitpicker arch-profile` on 2026-08-02. Regenerate when the
-repository's shape changes; `/nitpicker arch` audits against this document.
+Detected by `/nitpicker arch-profile` on 2026-08-02, updated 2026-08-04 after
+the audit fixes landed. Regenerate when the repository's shape changes;
+`/nitpicker arch` audits against this document.
 
 ## Pattern
 
@@ -22,45 +23,55 @@ upstream XMRig, and ships reference manifests for consuming it.
 **The image contract is defined once, in the `Dockerfile`, and every consumer
 must agree with it.** The contract is:
 
-| Element | Defined at | Consumed by |
+| Element | Defined by | Consumed by |
 | --- | --- | --- |
-| `/bin/xmrig` | `Dockerfile:55` | `CMD`, `README.md` layout table |
-| `/etc/xmrig/config.json` | `Dockerfile:56`, `:78` | `deployment.yaml` configMap mount, `docker-compose.yml` bind mount, `README.md` |
-| `/log`, owned by uid 10001 | `Dockerfile:51-53` | `deployment.yaml` emptyDir, `docker-compose.yml` bind mount |
-| `:8080` HTTP API | `config.json:22-28` | `Dockerfile` `HEALTHCHECK`, `deployment.yaml` liveness + readiness probes |
-| uid 10001, non-root | `Dockerfile:51`, `:68` | `deployment.yaml` `runAsUser`/`fsGroup`, the `chown` instruction in `README.md` |
-| `org.opencontainers.image.{version,licenses}` | `Dockerfile:43-44` | pinned again in `build.yaml:122-124` because buildx labels override `LABEL` |
+| `/bin/xmrig` | runtime-stage `COPY --from=builder` | `CMD`, `README.md` layout table |
+| `/etc/xmrig/config.json` | runtime-stage `COPY` + `CMD` | `deployment.yaml` configMap mount, `docker-compose.yml` bind mount, `README.md` |
+| `/log`, owned by uid 10001 | runtime-stage `adduser` + `chown` | `deployment.yaml` emptyDir, `docker-compose.yml` bind mount |
+| `:8080` HTTP API | `config.json` `http` block | `HEALTHCHECK`, `deployment.yaml` liveness + readiness probes |
+| uid 10001, non-root | runtime-stage `adduser` + `USER` | `deployment.yaml` `runAsUser`/`fsGroup`, the `chown` in `README.md` |
+| RandomX 2336 MiB floor | upstream RandomX, fixed | `memory` limits in all three deployment references |
+| `.version` / `.licenses` labels | `LABEL` | pinned again in `build.yaml`, because buildx labels override `LABEL` |
 
-There is no code path that enforces any of this. The contract is held together
-by comments, and the three deployment references are free to drift from it and
-from each other independently.
+File and line references are deliberately omitted: they drift on every edit, and
+a stale pointer in this document is exactly the defect it exists to catch.
 
-## Where this pattern fails, and does
+## Where this pattern fails
 
-Every architectural defect in this repository is one shape: **a consumer
-disagreeing with the contract, or two consumers disagreeing with each other.**
-Confirmed instances, all filed as findings:
+Every architectural defect found in this repository has had one shape: **a
+consumer disagreeing with the contract, or two consumers disagreeing with each
+other.** Historic instances, all now resolved:
 
-- `deployment.yaml` hardens the container (`cap_drop`, read-only rootfs,
-  `no-new-privileges`); `docker-compose.yml` and the `README.md` `docker run`
-  recipe apply none of it — same image, three security postures.
-- All three references cap memory at 2 GiB; the runtime needs 2336 MiB. The
-  contract's memory floor is written down nowhere, so all three got it wrong the
-  same way.
-- `config.json` enables `cpu.huge-pages`; `deployment.yaml` drops the capability
-  the `README.md` table says it requires.
-- The `README.md` Logging command assumes the container name only the `docker
-  run` path sets.
+- All three references capped memory at 2 GiB against a 2336 MiB requirement.
+  The floor was written down nowhere, so all three got it wrong identically
+  (`audit-4ed6f222`).
+- `deployment.yaml` hardened the container; `docker-compose.yml` and the
+  `docker run` recipe applied none of it — same image, three security postures
+  (`audit-f40795a1`).
+- `config.json` enabled `cpu.huge-pages` while `deployment.yaml` dropped the
+  capability the README said it required (`audit-b00928bd`).
+- Earlier still: the manifest pointed at `/xmrig/xmrig`, a path the image never
+  had (`audit-bdf51ba5`), and the in-image `LICENSE` pointer resolved to the
+  wrong licence (`audit-1fe51b16`).
 
-Historically the same shape produced the resolved findings `audit-bdf51ba5`
-(manifest pointed at `/xmrig/xmrig`, a path the image never had) and
-`audit-1fe51b16` (in-image `LICENSE` pointer resolved to the wrong licence).
+## Current enforcement
 
-## Architectural recommendation
+The contract now has one executable check. `verify` in
+`.github/workflows/build.yaml` starts the image with its own `CMD` and default
+config, polls `/2/summary`, asserts restricted mode, and runs the `HEALTHCHECK`
+command verbatim — pinning the `CMD`, the config, the `:8080` API and the
+healthcheck in a single step, on both published platforms. The builder also
+verifies the upstream commit SHA, so the source half of the contract is pinned
+too.
 
-The contract needs an executable definition, not a documented one. The cheapest
-form is a CI assertion that runs the image as shipped and checks each element —
-see finding `audit-49085f91`, which proposes exactly that for the `verify` job.
-A smoke test that starts the default `CMD` and probes `:8080` pins four of the
-six contract elements at once, and is the only thing in this repository that
-could have caught the drift above before publication.
+What remains unenforced, and is therefore where the next drift will appear:
+
+- **The memory floor.** Nothing fails if a manifest drops back below 2336 MiB;
+  it is documentation and a comment. A conformance test would need to run the
+  miner to the point of dataset allocation, which the smoke test deliberately
+  does not do.
+- **Cross-consumer parity.** No check compares `deployment.yaml`,
+  `docker-compose.yml` and the README recipe against each other. Each is
+  independently editable, and three of the four historic defects above were
+  parity failures.
+- **uid, paths and ownership.** Asserted by the image build, not by a test.

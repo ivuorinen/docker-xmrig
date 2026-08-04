@@ -36,8 +36,13 @@ The complete corresponding source is:
     https://github.com/xmrig/xmrig ; plus
   * the build recipe that applies the modification above, in the Dockerfile at
     https://github.com/ivuorinen/docker-xmrig
-    (also recorded in the image's org.opencontainers.image.source label; the
-    exact revision is in org.opencontainers.image.revision).
+    (also recorded in the image's org.opencontainers.image.source label).
+
+Images published by this repository's release workflow additionally carry an
+org.opencontainers.image.revision label naming the exact commit they were built
+from; docker/metadata-action sets it. A locally built image has no revision
+label, because supplying one would mean passing the commit in as a build
+argument, and the Dockerfile deliberately takes no such argument.
 
 Both travel inside the image itself, under /usr/share/licenses/xmrig/ :
 

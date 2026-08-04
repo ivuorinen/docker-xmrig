@@ -128,7 +128,7 @@ spec:
 # it. `kubectl get networkpolicy` showing the object is NOT evidence it is doing
 # anything. Verify with an actual connectivity test from another pod:
 #   kubectl run np-probe --rm -it --restart=Never --image=busybox -n xmrig -- \
-#     wget -qO- --timeout=5 http://<pod-ip>:8080/2/summary && echo "NOT ENFORCED"
+#     wget -qO- -T 5 http://<pod-ip>:8080/2/summary && echo "NOT ENFORCED"
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

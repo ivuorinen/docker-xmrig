@@ -1,4 +1,4 @@
-# config.json, NOTICE and LICENSE are COPYed into the image (Dockerfile:56,65,66)
+# config.json, NOTICE and LICENSE are COPYed into the image by the runtime stage
 # — do not exclude them. LICENSE has no extension, so it escapes the *.md rule
 # below by luck rather than by intent; keep that in mind before broadening these
 # patterns. Everything listed here is build-context weight (.git is 55 commits of
