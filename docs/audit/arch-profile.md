@@ -20,8 +20,18 @@ upstream XMRig, and ships reference manifests for consuming it.
 
 ## The load-bearing invariant
 
-**The image contract is defined once, in the `Dockerfile`, and every consumer
-must agree with it.** The contract is:
+**The image contract is assembled in the `Dockerfile`, and every consumer must
+agree with it.** Three sources define it *jointly*, and the `Dockerfile` is where
+they come together rather than where they all originate:
+
+- the **`Dockerfile`** — paths, uid, ownership, `CMD`, `HEALTHCHECK`, labels;
+- **`config.json`** — the API host and port the healthcheck and both probes
+  depend on;
+- **upstream RandomX** — the fixed 2336 MiB allocation, which nothing in this
+  repository can change.
+
+An audit that inspects only the `Dockerfile` will miss two of the three. The
+`Defined by` column below names the real authority for each element.
 
 | Element | Defined by | Consumed by |
 | --- | --- | --- |
@@ -72,6 +82,16 @@ What remains unenforced, and is therefore where the next drift will appear:
   does not do.
 - **Cross-consumer parity.** No check compares `deployment.yaml`,
   `docker-compose.yml` and the README recipe against each other. Each is
-  independently editable, and three of the four historic defects above were
-  parity failures.
+  independently editable. Two of the five historic defects above were true
+  consumer-to-consumer mismatches: the hardening drift and the `cpu.huge-pages`
+  capability. The memory floor was the opposite shape — all three consumers
+  agreed with *each other* and were wrong together — and the path and licence
+  items were consumer-versus-contract defects. Parity checking would have caught
+  two of five; only checking against the contract catches the rest.
 - **uid, paths and ownership.** Asserted by the image build, not by a test.
+- **Mining liveness.** Nothing distinguishes a pod that is mining from one that
+  is `Ready` at zero hashrate — the `HEALTHCHECK` and both probes prove only
+  that `/2/summary` responds. This is deliberate: making liveness depend on pool
+  state turns a pool-side outage into a crashloop. It is covered by the alerting
+  recipe in `README.md` rather than by any check in this repository, which is
+  the one gap here that is documented rather than enforced (`audit-8946ba75`).
