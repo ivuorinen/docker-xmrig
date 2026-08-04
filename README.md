@@ -148,12 +148,27 @@ want to modify include:
   repo rather than running `:latest`.
 - `replicas`: number of desired pods to be running. One pod is scheduled per
   node (see `affinity`), so this is capped by your node count.
-- `resources`: RandomX fast mode needs
+- `resources` — **memory**: RandomX fast mode needs
   `requests.memory == limits.memory >= 3Gi`. They must be **equal**: a smaller
   request lets the scheduler place the pod on a node that cannot satisfy the
   2336 MiB the miner then allocates, and the pod is OOM-killed after it has
   already been admitted. See [Performance tuning](#performance-tuning) before
   changing `memory`.
+- `resources` — **cpu**: `limits.cpu: "1"` is a **CFS quota, not a CPU set**, and
+  xmrig cannot see a quota. It reads the host topology through hwloc, so on a
+  64-core node it still starts ~64 mining threads and schedules them all into one
+  CPU of quota — the threads spend their time being throttled and context-switched
+  rather than hashing. Raising or lowering the number does not change how many
+  threads are created. Two things actually bound the thread count:
+  - run the kubelet with `--cpu-manager-policy=static` and give the pod
+    Guaranteed QoS (integer `cpu`, requests equal to limits). Integer CPU limits
+    then become *exclusive cores*, which hwloc does see; or
+  - leave the quota alone and pin the thread count in `config.json` instead —
+    e.g. `"cpu": { "max-threads-hint": 100, "rx": [0] }` — so the miner's plan
+    matches the quota regardless of how large the node is.
+
+  Under Docker the equivalent is `--cpuset-cpus`, which hwloc honours directly;
+  Kubernetes has no per-container cpuset field.
 - `affinity`: the manifest schedules only one pod per node. If that is not what
   you want, remove the `affinity` block.
 
