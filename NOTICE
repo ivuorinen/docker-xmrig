@@ -1,0 +1,61 @@
+NOTICE
+======
+
+This repository's own packaging — the Dockerfile, the Kubernetes and Compose
+manifests, the configuration, and the documentation — is licensed under the MIT
+License; see LICENSE at the repository root, shipped inside the image as
+LICENSE.packaging-MIT alongside this file.
+
+The container image built from this repository is a different thing, and is NOT
+MIT licensed.
+
+Bundled work
+------------
+
+The image contains XMRig (https://github.com/xmrig/xmrig), licensed under the
+GNU General Public License, version 3 or later.
+
+XMRig has been MODIFIED for this image. The modification, applied in the builder
+stage of the Dockerfile, is:
+
+    src/donate.h — kDefaultDonateLevel and kMinimumDonateLevel are both changed
+    from 1 to 0, disabling the miner's built-in donation.
+
+No other source file is altered.
+
+Because the image conveys a modified GPL-3.0 work in object form, the image as a
+whole is conveyed under the terms of the GPL-3.0-or-later.
+
+Corresponding source
+--------------------
+
+The complete corresponding source is:
+
+  * upstream XMRig at the tag recorded in the image's
+    org.opencontainers.image.version label, from
+    https://github.com/xmrig/xmrig ; plus
+  * the build recipe that applies the modification above, in the Dockerfile at
+    https://github.com/ivuorinen/docker-xmrig
+    (also recorded in the image's org.opencontainers.image.source label).
+
+Images published by this repository's release workflow additionally carry an
+org.opencontainers.image.revision label naming the exact commit they were built
+from; docker/metadata-action sets it. A locally built image has no revision
+label, because supplying one would mean passing the commit in as a build
+argument, and the Dockerfile deliberately takes no such argument.
+
+Both travel inside the image itself, under /usr/share/licenses/xmrig/ :
+
+    LICENSE.xmrig-GPL-3.0   — upstream XMRig GPL-3.0 licence text
+    LICENSE.packaging-MIT   — this repository's MIT licence, for the packaging
+    donate.h                — the modified file, as compiled
+    NOTICE                  — this file
+
+Attribution
+-----------
+
+This repository is based on the work of:
+
+  * jrkalf/xmrig-kryptokrona   https://github.com/jrkalf/xmrig-kryptokrona
+  * Roberto Melendez           https://github.com/rcmelendez/xmrig-docker
+  * Bufanda                    https://github.com/bufanda/docker-xmrig
