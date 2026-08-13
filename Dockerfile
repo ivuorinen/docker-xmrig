@@ -6,9 +6,13 @@ ARG XMRIG_VERSION="v6.22.2"
 # pointer — upstream can move it, and every later build of this unchanged
 # Dockerfile would then compile different source under the same version label,
 # which neither --branch nor the version smoke test can detect. This is the pin
-# that actually holds. Renovate bumps XMRIG_VERSION; the rev-parse check below
-# then fails the build until this line is updated in the same commit.
-# Refresh with:
+# that actually holds.
+#
+# Renovate bumps XMRIG_VERSION from the annotation above; it does NOT touch this
+# line — no annotation and no customManager covers it. So every xmrig bump PR is
+# red by construction: the rev-parse check below fails, prints the tag's real
+# commit, and a maintainer pastes it here on the same branch. The SHA is already
+# in the failed build log ("got <sha>") — no lookup needed. To check by hand:
 #   git ls-remote https://github.com/xmrig/xmrig.git 'refs/tags/<tag>^{}' 'refs/tags/<tag>'
 ARG XMRIG_COMMIT="f9e990d0f0167c92d09334213ac6950033bbbba1"
 
@@ -110,7 +114,15 @@ USER 10001
 # .connection.pool == "" from /2/summary; it is deliberately not wired to the
 # healthcheck, because restarting on a pool outage turns their outage into a
 # crashloop. Requires the "http" block in config.json to stay enabled.
+#
+# Exec form, not shell form. hadolint 2.15 raises DL3025 on the shell form, and
+# the lint job runs at failure-threshold=info and gates every publish job — so a
+# shell-form healthcheck here pins the repository to hadolint 2.14 forever. The
+# `|| exit 1` the shell form needed is redundant anyway: wget already exits
+# non-zero on a failed request, which is what Docker reads. /dev/null is a device
+# node, so this still works under the --read-only every consumer applies.
+# build.yaml runs this same argv by reading it back out of the built image.
 HEALTHCHECK --interval=60s --timeout=5s --start-period=120s \
-  CMD wget -qO- http://127.0.0.1:8080/2/summary >/dev/null 2>&1 || exit 1
+  CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/2/summary"]
 
 CMD ["/bin/xmrig", "-c", "/etc/xmrig/config.json"]

@@ -44,6 +44,24 @@ jobs:
         uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
         with:
           args: -color
+      # The two manifests README tells users to apply verbatim were the only
+      # tracked files no job ever opened. Both checks below are schema-aware on
+      # purpose — a plain YAML parse accepts `read_onli:` and
+      # `readOnlyRootFileSystem:` happily, and the manifest still reads as
+      # hardened while the setting is gone.
+      #
+      # Compose validates its own schema: an unknown service or limits key exits
+      # 1 with "additional properties '<key>' not allowed". Nothing extra needed.
+      - name: Validate Compose file
+        run: docker compose -f docker-compose.yml config --quiet
+      # kubectl is the opposite — it accepts unknown fields and silently drops
+      # them, so a one-character typo in securityContext applies cleanly and the
+      # pod runs unhardened. -strict is what turns that into a failure here;
+      # without it kubeconform reports this file valid with the typo in place.
+      - name: Validate Kubernetes manifests
+        uses: docker://ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e # v0.8.0
+        with:
+          args: -strict -summary deployment.yaml
 
   # Gates publication. Builds each published platform on a native runner, then
   # actually runs the binary — this is what catches an empty XMRIG_VERSION, a
@@ -103,11 +121,17 @@ jobs:
           fi
       # `--version` overrides CMD, so the above never reads config.json, never
       # starts the HTTP API and never exercises the HEALTHCHECK. This does: it
-      # runs the image exactly as shipped and pins the parts deployment.yaml's
-      # probes and the Dockerfile's HEALTHCHECK depend on.
+      # runs the image exactly as shipped and pins the CMD, the config, the
+      # :8080 API, the HEALTHCHECK, and the read-only/no-capability posture —
+      # everything deployment.yaml's probes and securityContext depend on.
       - name: Smoke test the image as shipped
         run: |
-          cid="$(docker run -d xmrig:ci)"
+          # These three flags are not decoration: deployment.yaml,
+          # docker-compose.yml and the README recipe all apply them, and until
+          # they were added here the posture was asserted in three manifests and
+          # executed in none. A future xmrig that writes one file to / at startup
+          # would break every real deployment while CI stayed green.
+          cid="$(docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges xmrig:ci)"
           trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 30); do
             docker exec "$cid" sh -c 'wget -qO- http://127.0.0.1:8080/2/summary' \
@@ -126,9 +150,48 @@ jobs:
             cat /tmp/summary.json
             exit 1
           }
-          # the container's own HEALTHCHECK command, run verbatim
-          docker exec "$cid" sh -c 'wget -qO- http://127.0.0.1:8080/2/summary >/dev/null 2>&1' || {
-            echo "::error::HEALTHCHECK command failed inside the image"; exit 1; }
+          # The container's own HEALTHCHECK command, read back out of the image
+          # rather than restated here — a hardcoded copy is only verbatim until
+          # someone edits the Dockerfile. Element 0 of .Config.Healthcheck.Test
+          # is the type marker ("CMD"), so drop it and exec the rest.
+          mapfile -t hc < <(docker inspect -f '{{json .Config.Healthcheck.Test}}' xmrig:ci | jq -r '.[1:][]')
+          test "${#hc[@]}" -gt 0 || {
+            echo "::error::image declares no HEALTHCHECK — the Dockerfile instruction was dropped"; exit 1; }
+          printf 'running healthcheck:'; printf ' %q' "${hc[@]}"; echo
+          # docker exec does not inherit HEALTHCHECK --timeout, and busybox wget
+          # waits 900s by default — a stalled request would park this step until
+          # the job timeout. Enforce the image's own timeout, read from the image
+          # for the same reason the argv above is: a hardcoded 5s here would be a
+          # second copy of a constant the Dockerfile already owns.
+          #
+          # `{{json .Config.Healthcheck.Timeout}}`, NOT `{{.Config.Healthcheck.Timeout}}`
+          # — the latter renders the Go duration's String(), giving "5s", which
+          # is not arithmetic and quietly yields an empty $secs. json gives the
+          # raw nanoseconds. A bad parse is an error, not a default: silently
+          # falling back is what hid this exact bug during review.
+          ns="$(docker inspect -f '{{json .Config.Healthcheck.Timeout}}' xmrig:ci)"
+          case "$ns" in
+            ''|*[!0-9]*)
+              echo "::error::could not read HEALTHCHECK timeout from the image (got '${ns}')"; exit 1 ;;
+          esac
+          secs=$(( ns / 1000000000 ))
+          # 0 means the Dockerfile set no --timeout; Docker's documented default
+          # is 30s. Say so rather than pass `timeout 0s`, which GNU coreutils
+          # reads as no limit at all.
+          if [ "$secs" -le 0 ]; then
+            echo "image declares no HEALTHCHECK timeout; using Docker's 30s default"
+            secs=30
+          fi
+          # `|| rc=$?` keeps the failure out of set -e's hands so rc survives.
+          rc=0
+          timeout "${secs}s" docker exec "$cid" "${hc[@]}" || rc=$?
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::HEALTHCHECK exceeded the image's own ${secs}s timeout"
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error::HEALTHCHECK command failed inside the image (exit ${rc})"
+            exit 1
+          fi
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
