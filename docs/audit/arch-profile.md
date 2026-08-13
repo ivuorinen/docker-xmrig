@@ -39,6 +39,7 @@ An audit that inspects only the `Dockerfile` will miss two of the three. The
 | `/etc/xmrig/config.json` | runtime-stage `COPY` + `CMD` | `deployment.yaml` configMap mount, `docker-compose.yml` bind mount, `README.md` |
 | `/log`, owned by uid 10001 | runtime-stage `adduser` + `chown` | `deployment.yaml` emptyDir, `docker-compose.yml` bind mount |
 | `:8080` HTTP API | `config.json` `http` block | `HEALTHCHECK`, `deployment.yaml` liveness + readiness probes |
+| 5s probe timeout on `:8080` | `HEALTHCHECK --timeout=5s` | `deployment.yaml` `timeoutSeconds` on both probes; stated explicitly because the Kubernetes default of 1s is not survivable under the manifest's own CPU quota |
 | uid 10001, non-root | runtime-stage `adduser` + `USER` | `deployment.yaml` `runAsUser`/`fsGroup`, the `chown` in `README.md` |
 | RandomX 2336 MiB floor | upstream RandomX, fixed | `memory` limits in all three deployment references |
 | `.version` / `.licenses` labels | `LABEL` | pinned again in `build.yaml`, because buildx labels override `LABEL` |
@@ -66,13 +67,19 @@ other.** Historic instances, all now resolved:
 
 ## Current enforcement
 
-The contract now has one executable check. `verify` in
+The contract now has executable checks. `verify` in
 `.github/workflows/build.yaml` starts the image with its own `CMD` and default
-config, polls `/2/summary`, asserts restricted mode, and runs the `HEALTHCHECK`
-command verbatim — pinning the `CMD`, the config, the `:8080` API and the
-healthcheck in a single step, on both published platforms. The builder also
-verifies the upstream commit SHA, so the source half of the contract is pinned
-too.
+config **under the same `--read-only --cap-drop ALL --security-opt
+no-new-privileges` posture every consumer applies**, polls `/2/summary`, asserts
+restricted mode, and runs the `HEALTHCHECK` command — read back out of the image
+with `docker inspect` rather than restated, so the step cannot drift from the
+`Dockerfile`. That pins the `CMD`, the config, the `:8080` API, the healthcheck
+and the security posture in a single step, on both published platforms. The
+builder also verifies the upstream commit SHA, so the source half of the
+contract is pinned too. `lint` additionally parses both consumer manifests:
+`docker compose config` for Compose and `kubeconform -strict` for the Kubernetes
+objects, the latter being what rejects a misspelled field that `kubectl apply`
+would silently drop.
 
 What remains unenforced, and is therefore where the next drift will appear:
 
@@ -80,14 +87,17 @@ What remains unenforced, and is therefore where the next drift will appear:
   it is documentation and a comment. A conformance test would need to run the
   miner to the point of dataset allocation, which the smoke test deliberately
   does not do.
-- **Cross-consumer parity.** No check compares `deployment.yaml`,
-  `docker-compose.yml` and the README recipe against each other. Each is
-  independently editable. Two of the five historic defects above were true
-  consumer-to-consumer mismatches: the hardening drift and the `cpu.huge-pages`
-  capability. The memory floor was the opposite shape — all three consumers
-  agreed with *each other* and were wrong together — and the path and licence
-  items were consumer-versus-contract defects. Parity checking would have caught
-  two of five; only checking against the contract catches the rest.
+- **Cross-consumer parity of values.** Schema validation now proves each
+  manifest is *well-formed*; nothing compares `deployment.yaml`,
+  `docker-compose.yml` and the README recipe against *each other*. Each is
+  independently editable, so a memory ceiling or a probe timeout can still be
+  changed in one and not the others. Two of the five historic defects above were
+  true consumer-to-consumer mismatches: the hardening drift (now executed in CI)
+  and the `cpu.huge-pages` capability. The memory floor was the opposite shape —
+  all three consumers agreed with *each other* and were wrong together — and the
+  path and licence items were consumer-versus-contract defects. Parity checking
+  would have caught two of five; only checking against the contract catches the
+  rest.
 - **uid, paths and ownership.** Asserted by the image build, not by a test.
 - **Mining liveness.** Nothing distinguishes a pod that is mining from one that
   is `Ready` at zero hashrate — the `HEALTHCHECK` and both probes prove only

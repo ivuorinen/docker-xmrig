@@ -83,18 +83,28 @@ spec:
           # hashrate, so a pod can still be Ready while mining nothing. Alert on
           # .connection.pool == "" from /2/summary externally; do not put it in the
           # probe, or a pool outage becomes a crashloop.
+          #
+          # timeoutSeconds is stated explicitly on both, and matches the image's
+          # own HEALTHCHECK --timeout=5s for this same endpoint. The Kubernetes
+          # default is 1s, and the `cpu: "1"` quota above is what makes 1s miss:
+          # xmrig starts one mining thread per HOST core and schedules them all
+          # into that single CPU, so the API thread can lose a 1s window while the
+          # miner is perfectly healthy. Three of those in a row restarts a working
+          # pod, and the container HEALTHCHECK reports healthy the whole time.
           livenessProbe:
             httpGet:
               path: /2/summary
               port: 8080
             initialDelaySeconds: 120
             periodSeconds: 30
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /2/summary
               port: 8080
             initialDelaySeconds: 30
             periodSeconds: 15
+            timeoutSeconds: 5
           volumeMounts:
             # Must be /etc/xmrig — the image's CMD reads /etc/xmrig/config.json.
             - name: config-volume

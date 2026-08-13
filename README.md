@@ -312,9 +312,9 @@ The Compose and Kubernetes `/log` mounts are already wired:
 [Persistent Volume](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
 to survive rescheduling).
 
-The standalone `docker run` recipe above mounts only `config.json`, so add the
-volume there yourself — without it xmrig writes the log inside the container's
-own filesystem, where it is lost on `--rm` and invisible on the host:
+The standalone `docker run` recipe above mounts only `config.json`, and it runs
+`--read-only`, so `/log` is not writable at all — without the volume below xmrig
+writes no log anywhere and, per the note further down, says nothing about it:
 
 ```bash
     --volume "$(pwd)"/log:/log:rw \
