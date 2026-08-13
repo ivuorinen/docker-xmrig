@@ -158,8 +158,40 @@ jobs:
           test "${#hc[@]}" -gt 0 || {
             echo "::error::image declares no HEALTHCHECK — the Dockerfile instruction was dropped"; exit 1; }
           printf 'running healthcheck:'; printf ' %q' "${hc[@]}"; echo
-          docker exec "$cid" "${hc[@]}" || {
-            echo "::error::HEALTHCHECK command failed inside the image"; exit 1; }
+          # docker exec does not inherit HEALTHCHECK --timeout, and busybox wget
+          # waits 900s by default — a stalled request would park this step until
+          # the job timeout. Enforce the image's own timeout, read from the image
+          # for the same reason the argv above is: a hardcoded 5s here would be a
+          # second copy of a constant the Dockerfile already owns.
+          #
+          # `{{json .Config.Healthcheck.Timeout}}`, NOT `{{.Config.Healthcheck.Timeout}}`
+          # — the latter renders the Go duration's String(), giving "5s", which
+          # is not arithmetic and quietly yields an empty $secs. json gives the
+          # raw nanoseconds. A bad parse is an error, not a default: silently
+          # falling back is what hid this exact bug during review.
+          ns="$(docker inspect -f '{{json .Config.Healthcheck.Timeout}}' xmrig:ci)"
+          case "$ns" in
+            ''|*[!0-9]*)
+              echo "::error::could not read HEALTHCHECK timeout from the image (got '${ns}')"; exit 1 ;;
+          esac
+          secs=$(( ns / 1000000000 ))
+          # 0 means the Dockerfile set no --timeout; Docker's documented default
+          # is 30s. Say so rather than pass `timeout 0s`, which GNU coreutils
+          # reads as no limit at all.
+          if [ "$secs" -le 0 ]; then
+            echo "image declares no HEALTHCHECK timeout; using Docker's 30s default"
+            secs=30
+          fi
+          # `|| rc=$?` keeps the failure out of set -e's hands so rc survives.
+          rc=0
+          timeout "${secs}s" docker exec "$cid" "${hc[@]}" || rc=$?
+          if [ "$rc" -eq 124 ]; then
+            echo "::error::HEALTHCHECK exceeded the image's own ${secs}s timeout"
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error::HEALTHCHECK command failed inside the image (exit ${rc})"
+            exit 1
+          fi
       - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
