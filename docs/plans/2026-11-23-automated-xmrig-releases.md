@@ -346,9 +346,13 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
       `latest` back. If its `tag` job failed, the reverted Dockerfile matches the last git tag, the run's `release`
       job reports `no release`, and `latest` stays on the bad image (raised in review on #52).
   2. Add `allowedVersions` (for example `"<7"`) to Rule B so Renovate does not reopen the bad version.
-  3. Read the revert run's `release` notice. If it says `no release`, or to re-point `latest` without waiting for
-      the run, run
-      `docker buildx imagetools create -t ivuorinen/docker-xmrig:latest ivuorinen/docker-xmrig:<previous good tag>`.
+  3. Wait until `Build and release` has no queued or in-progress run on `main`. In-progress `main` runs are never
+      cancelled, so an earlier one can still move `latest` to the bad image after a manual fix. Then compare the
+      `Digest:` line of `docker buildx imagetools inspect` for `ivuorinen/docker-xmrig:latest` and for the bad
+      release's tag. If they match, because the revert run reported `no release` or stopped before publishing (its
+      `release` job does not wait for `verify`, so it can say `publishing` and still fail), run
+      `docker buildx imagetools create -t ivuorinen/docker-xmrig:latest ivuorinen/docker-xmrig:<previous good tag>`
+      (raised in review on #52).
 - **Revert this whole change:** revert the PR. Publishing returns to tag-push only and Renovate stops tracking
   xmrig.
   - Images and git tags already published remain.
