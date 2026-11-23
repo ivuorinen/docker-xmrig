@@ -331,6 +331,27 @@ Two things to know before you opt in:
   makes the kubelet evict this pod rather than fill the node; raise it alongside
   `resources.limits.ephemeral-storage`, not on its own.
 
+## Releases
+
+Images are published to Docker Hub as `<xmrig version>-<YYYY-MM-DD>`, for
+example `6.22.2-2024-11-03`, and every publish also moves `:latest`.
+
+Publishing is automatic. Renovate watches upstream
+[xmrig/xmrig](https://github.com/xmrig/xmrig) and the Alpine base image, and
+opens a pull request for each new release. Once CI shows that the `donate.h`
+patch still applies and that the image builds, runs as shipped and passes the
+vulnerability scan, Renovate merges the pull request, and the merge publishes a
+new image. That includes **new major xmrig versions**: `:latest` moves to them
+without review, which is why the Kubernetes steps above recommend pinning a
+released tag.
+
+- A second release of the same xmrig version on the same day gets a `.2`, `.3`,
+  … suffix (`6.27.0-2026-11-25.2`), so a published tag never changes.
+- Each release is also a git tag in this repository, on the commit the image was
+  built from; the image's `org.opencontainers.image.revision` label names that
+  commit as well.
+- Pushing a git tag by hand still publishes an image under that tag.
+
 ## Disclaimer
 
 Use at your own discretion. This repository is by no means financial advice to
