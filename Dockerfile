@@ -22,7 +22,7 @@ ARG XMRIG_COMMIT="f9e990d0f0167c92d09334213ac6950033bbbba1"
 # xmrig is compiled here and the bare binary is copied into the runtime stage, so
 # if the two stages ever resolved to different bases the binary would link
 # against a different musl/libuv/hwloc/OpenSSL than the one that runs it.
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS base
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS base
 
 FROM base AS builder
 
