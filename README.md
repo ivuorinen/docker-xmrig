@@ -207,13 +207,13 @@ are worth enabling only if you can grant what they need:
 
 1. `--cap-add SYS_RAWIO --device /dev/cpu` under Docker. No effect on arm64.
 2. **Docker:** host `vm.nr_hugepages` plus `--cap-add IPC_LOCK`.
-   **Kubernetes:** a node with pre-allocated hugepages, a
-   `resources.limits.hugepages-2Mi` entry, *and* `IPC_LOCK` added back to the
-   otherwise-dropped capability set. The shipped `deployment.yaml` does none of
-   these, so hugepages are off there — worth roughly 20-30% of RandomX hashrate.
-   Check for `huge pages 0%` in the `randomx allocated` log line to confirm.
+    **Kubernetes:** a node with pre-allocated hugepages, a
+    `resources.limits.hugepages-2Mi` entry, *and* `IPC_LOCK` added back to the
+    otherwise-dropped capability set. The shipped `deployment.yaml` does none of
+    these, so hugepages are off there — worth roughly 20-30% of RandomX hashrate.
+    Check for `huge pages 0%` in the `randomx allocated` log line to confirm.
 3. Built with `-DWITH_OPENCL=OFF -DWITH_CUDA=OFF`; adding those blocks to
-   `config.json` is silently ignored. Rebuild from source for GPU mining.
+    `config.json` is silently ignored. Rebuild from source for GPU mining.
 
 With enough memory, everything above degrades to a lower hashrate rather than
 failing. Memory is the exception — see the table at the top of this section.

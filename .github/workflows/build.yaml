@@ -40,8 +40,13 @@ jobs:
       # `# shellcheck disable=SC2046` directive in the merge job assumes exists.
       # The release pipeline's shell is where a quoting mistake silently
       # mis-tags a published image, so it is worth gating.
+      #
+      # actionlint v1.7.12. The version sits here, not as a trailing `# v1.7.12`
+      # on the uses: line, because that line would then exceed .editorconfig's
+      # 120 columns; Renovate tracks a docker:// ref by its digest alone and
+      # never read that comment.
       - name: Lint workflows
-        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
         with:
           args: -color
       # The two manifests README tells users to apply verbatim were the only
@@ -58,8 +63,11 @@ jobs:
       # them, so a one-character typo in securityContext applies cleanly and the
       # pod runs unhardened. -strict is what turns that into a failure here;
       # without it kubeconform reports this file valid with the typo in place.
+      #
+      # kubeconform v0.8.0 — version noted here for the same reason as
+      # actionlint's above.
       - name: Validate Kubernetes manifests
-        uses: docker://ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e # v0.8.0
+        uses: docker://ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
         with:
           args: -strict -summary deployment.yaml
 
