@@ -334,14 +334,21 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
 ## Rollback / abort
 
 - **Stop automation without reverting:**
-  - Add `"enabled": false` to Rule B in `.github/renovate.json`, or untick the dependency in the Dashboard.
+  - Add `"enabled": false` to Rule C in `.github/renovate.json`. It matches every Dockerfile update: xmrig, the
+    alpine digest, and an alpine version bump, which the preset automerges as minor. Rules A and B each cover
+    only their own updates, so with Rule B alone disabled, alpine PRs still automerge and every merge publishes
+    (raised in review on #52). A local Renovate run with Rule C disabled reports both `alpine` and `xmrig/xmrig`
+    as `skipReason: disabled`, with GitHub Actions updates unaffected.
   - Or `gh workflow disable "Build and release"`.
 - **Bad automated release:**
-  1. `git revert` the Renovate commit on `main`. The Dockerfile changes, so the revert itself publishes the
-      previous version under today's date and moves `latest` back.
+  1. `git revert` the Renovate commit on `main`. If the bad release has its git tag, the reverted Dockerfile
+      differs from that tag, so the revert's run publishes the previous version under today's date and moves
+      `latest` back. If its `tag` job failed, the reverted Dockerfile matches the last git tag, the run's `release`
+      job reports `no release`, and `latest` stays on the bad image (raised in review on #52).
   2. Add `allowedVersions` (for example `"<7"`) to Rule B so Renovate does not reopen the bad version.
-  3. To re-point `latest` immediately, run
-      `docker buildx imagetools create -t ivuorinen/docker-xmrig:latest ivuorinen/docker-xmrig:<previous tag>`.
+  3. Read the revert run's `release` notice. If it says `no release`, or to re-point `latest` without waiting for
+      the run, run
+      `docker buildx imagetools create -t ivuorinen/docker-xmrig:latest ivuorinen/docker-xmrig:<previous good tag>`.
 - **Revert this whole change:** revert the PR. Publishing returns to tag-push only and Renovate stops tracking
   xmrig.
   - Images and git tags already published remain.
@@ -361,8 +368,10 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
   rarer than that.
 - **Changes only to `config.json`, `NOTICE` or `LICENSE`** do not auto-publish. They ship with the next Dockerfile
   change or a manual tag push. Accepted to avoid a path list coupled to the `COPY` lines.
-- **A `tag` job failure after publishing** leaves an untagged release, so the next Dockerfile-changing merge also
-  publishes. The result is one redundant image, and the red run flags it. Accepted.
+- **A `tag` job failure after publishing** leaves an untagged release, so the next push to `main` publishes again.
+  `release` checks Docker Hub as well as git tags when it picks a name, so that image gets a `.N` name instead of
+  overwriting the untagged one (raised in review on #52). The result is one redundant image, and the red run flags
+  it. Accepted.
 - **No required status checks on `main`.** `platformAutomerge: false` makes Renovate itself check that CI is
   green. Enabling the disabled `main` ruleset with required checks would be defence in depth. It is not part of
   this plan (a repo setting, the user's call).

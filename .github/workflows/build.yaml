@@ -228,13 +228,15 @@ jobs:
           severity: CRITICAL,HIGH
 
   # Decides whether this run publishes, and under which tag. Runs beside
-  # `verify` rather than after it: it only reads git, and `build` needs both.
+  # `verify` rather than after it: it reads only git and Docker Hub's tag list,
+  # and `build` needs both.
   #
   # - A pushed git tag publishes under that tag (the manual path).
   # - main publishes when the Dockerfile changed since the last release tag,
   #   i.e. Renovate merged an xmrig bump or a base-image digest bump. The tag is
   #   <xmrig version without v>-<UTC date>, with .2, .3, ... appended while that
-  #   name is taken, so a published tag never changes under anyone pinning it.
+  #   name is taken as a git tag or on Docker Hub, so a published tag never
+  #   changes under anyone pinning it.
   #   "Since the last release tag" rather than "in this push" makes it
   #   self-healing: a run that failed verify or stopped early leaves no tag, so
   #   the next main push, or a workflow_dispatch on main, publishes instead.
@@ -291,7 +293,24 @@ jobs:
                   base="${v}-$(date -u +%F)"
                   tag="$base"
                   n=1
-                  while git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; do
+                  # A name is taken when its git tag exists OR Docker Hub already
+                  # has it. Git alone misses one case: a `tag` job that failed after
+                  # `merge` published leaves the image without its git tag, and the
+                  # next same-day release would overwrite it. Any Hub answer other
+                  # than 200 or 404 fails the job, as a git error does.
+                  hub="https://hub.docker.com/v2/namespaces/${REGISTRY_IMAGE%%/*}"
+                  hub="${hub}/repositories/${REGISTRY_IMAGE#*/}/tags"
+                  taken() {
+                    git rev-parse -q --verify "refs/tags/$1" >/dev/null && return 0
+                    code="$(curl -sS --retry 3 --max-time 20 -o /dev/null -w '%{http_code}' "${hub}/$1")" ||
+                      code=000
+                    case "$code" in
+                      200) return 0 ;;
+                      404) return 1 ;;
+                      *) echo "::error::Docker Hub lookup of $1 failed (HTTP ${code})"; exit 1 ;;
+                    esac
+                  }
+                  while taken "$tag"; do
                     n=$((n + 1))
                     tag="${base}.${n}"
                   done
@@ -431,9 +450,12 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+      # The pushed name, not the release output: metadata-action rewrites
+      # characters a Docker tag cannot hold, so a manual git tag such as
+      # `v1+x` is published as `v1-x`.
       - name: Inspect image
         env:
-          TAG: ${{ needs.release.outputs.tag }}
+          TAG: ${{ steps.meta.outputs.version }}
         run: |
           docker buildx imagetools inspect "${REGISTRY_IMAGE}:${TAG}"
 
