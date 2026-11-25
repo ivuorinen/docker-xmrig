@@ -163,11 +163,14 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
         - `last=$(git describe --tags --abbrev=0 --match '[0-9]*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' HEAD)`.
         - If `git diff --quiet "$last" HEAD -- Dockerfile`, emit `::notice::no release: Dockerfile unchanged since
           $last`.
-        - Otherwise set `tag=<XMRIG_VERSION without v>-$(date -u +%F)`. If that git tag already exists, append `.2`,
-          `.3`, and so on until it is free. Set `publish=true` and `create_tag=true`, and emit
-          `::notice::publishing $tag`.
+        - Otherwise set `tag=<XMRIG_VERSION without v>-$(date -u +%F)`. While that name is taken, append `.2`, `.3`,
+          and so on. A name is taken when its git tag exists or Docker Hub has it:
+          `GET https://hub.docker.com/v2/namespaces/<ns>/repositories/<repo>/tags/<name>` answers 200 (taken) or
+          404 (free). Git alone misses an image whose `tag` job failed after `merge` published it. Set
+          `publish=true` and `create_tag=true`, and emit `::notice::publishing $tag`.
       - Any other ref → `publish=false`.
-      - Any git failure fails the job. It never falls through to "publish".
+      - Any git failure, or a Docker Hub answer other than 200 or 404, fails the job. It never falls through to
+        "publish".
     - `build`: `needs: [verify, release]`, `if: needs.release.outputs.publish == 'true'`. This replaces
       `startsWith(github.ref, 'refs/tags/')`.
     - `merge`: `needs: [build, release]`. metadata-action gets two tag lines, `type=ref,event=tag` and
@@ -255,7 +258,8 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
     - Cut: publishing happens in the same run, and the git tag is only a record.
   - Examined how to detect "needs a release". Cut:
     - `dorny/paths-filter` (a new third-party action).
-    - Querying the Docker Hub API (external state).
+    - Querying the Docker Hub API (external state) to decide whether to release. Picking a free name does query
+      it (Task 4), because git tags alone miss an image whose `tag` job failed.
     - A cron schedule.
     - `git diff` against the last release tag needs none of them.
   - Examined GitHub's own `on.push.paths` filter (2026-11-25). Added on top of the diff, not instead of it: the
@@ -291,7 +295,8 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
   - `platformAutomerge: false` prevents GitHub merging before CI with no branch protection (Finding 7).
 - **errors / leaks**
   - Failure path of each new operation:
-    - A `git describe` or `git diff` error fails `release`, so `build` is skipped. Fails closed, and loudly.
+    - A `git describe` or `git diff` error fails `release`, so `build` is skipped. Fails closed, and loudly. So
+      does a Docker Hub tag lookup that answers anything other than 200 or 404, including no answer at all.
     - A missing `donate_level` fails `verify`.
     - A failed `tag` job after publishing turns the run red. The next Dockerfile change publishes again under a new
       date. Accepted below.
