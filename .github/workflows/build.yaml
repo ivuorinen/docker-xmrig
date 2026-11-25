@@ -8,6 +8,14 @@ on:
       - main
     tags:
       - "*"
+    # A push to main runs this workflow, and so can publish, only when it
+    # changes the Dockerfile: merging documentation or GitHub Actions updates
+    # releases nothing. Those changes are linted and verified on their pull
+    # request, which has no filter; a direct push to main that leaves the
+    # Dockerfile alone runs neither. GitHub does not apply path filters to tag
+    # pushes, so the manual tag path is unaffected.
+    paths:
+      - Dockerfile
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
@@ -239,7 +247,11 @@ jobs:
   #   changes under anyone pinning it.
   #   "Since the last release tag" rather than "in this push" makes it
   #   self-healing: a run that failed verify or stopped early leaves no tag, so
-  #   the next main push, or a workflow_dispatch on main, publishes instead.
+  #   the next main push that changes the Dockerfile, or a workflow_dispatch on
+  #   main, publishes instead. The `paths` filter on `push` already keeps other
+  #   main pushes from running at all; this diff still decides for
+  #   workflow_dispatch, and for the runs GitHub starts despite the filter (a
+  #   push of over 1,000 commits, or a diff that timed out).
   # - Anything else (pull requests, other branches) publishes nothing.
   #
   # The tag, date included, is computed once, here, and read by both `merge` and

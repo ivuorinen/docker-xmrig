@@ -345,6 +345,8 @@ new image. That includes **new major xmrig versions**: `:latest` moves to them
 without review, which is why the Kubernetes steps above recommend pinning a
 released tag.
 
+- Only a merge that changes the `Dockerfile` publishes. Documentation changes
+  and GitHub Actions updates do not.
 - A second release of the same xmrig version on the same day gets a `.2`, `.3`,
   … suffix (`6.27.0-2026-11-25.2`), so a published tag never changes.
 - Each release is also a git tag in this repository, on the commit the image was

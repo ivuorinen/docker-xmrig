@@ -62,6 +62,12 @@ Each one was verified during planning. Nothing below is assumed.
   and base-image bumps.
 - xmrig **majors automerge too**.
 
+Added by the user on 2026-11-25, in review of #52:
+
+- Only a push to `main` that **changes the Dockerfile** may publish. Documentation changes and GitHub Actions updates
+  do not trigger a release (Task 4, `on.push.paths`).
+- Merging #52 publishes a release, because its Dockerfile differs from `6.22.2-2024-11-03`. Accepted.
+
 ## Scope & constraints
 
 Touches: `Dockerfile`, `.github/renovate.json`, `.github/workflows/build.yaml`, `README.md`,
@@ -146,6 +152,9 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
 
 4. **Publish from `main` when the Dockerfile changed since the last release.** File:
     `.github/workflows/build.yaml`.
+    - `on.push.paths: [Dockerfile]`: a `main` push that leaves the Dockerfile alone starts no run, so merging
+      documentation or GitHub Actions updates publishes nothing. GitHub does not apply path filters to tag pushes,
+      and `pull_request` has no filter, so both run as before.
     - New job `release` (ubuntu-latest, timeout 5): checkout with `fetch-depth: 0` and
       `persist-credentials: false`, then a step `decide` that writes `publish`, `tag` and `create_tag` outputs:
       - `refs/tags/*` → `publish=true`, `tag=$GITHUB_REF_NAME`, `create_tag=false`. The manual path is unchanged.
@@ -199,6 +208,7 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
     - README: new `## Releases` section before `## Disclaimer`, stating:
       - The tag scheme: `<xmrig version>-<YYYY-MM-DD>`, with `.N` on a same-day re-release.
       - Images publish automatically when Renovate merges an xmrig or base-image update.
+      - Only a merge that changes the `Dockerfile` publishes; documentation and GitHub Actions updates do not.
       - `latest` follows every publish, **including xmrig major versions**, which is why line 147 recommends
         pinning.
       - A manual git tag push still publishes.
@@ -230,7 +240,7 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
       published.
     - From 2026-11-26, when `v6.27.0` clears `minimumReleaseAge`, a PR to `v6.27.0` / `be97bc8f…` follows the same
       path, or the open `v6.26.0` PR is updated to it.
-    - If an open action PR (#46–#51) merges after that, its run reports `no release: Dockerfile unchanged`.
+    - If an open action PR (#46–#51) merges after that, no `Build and release` run starts for its merge commit.
 
 ## Adversarial hardening
 
@@ -244,6 +254,10 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
     - Querying the Docker Hub API (external state).
     - A cron schedule.
     - `git diff` against the last release tag needs none of them.
+  - Examined GitHub's own `on.push.paths` filter (2026-11-25). Added on top of the diff, not instead of it: the
+    filter stops `main` runs for pushes that leave the Dockerfile alone, and the diff still decides for
+    `workflow_dispatch` and for the runs GitHub starts despite a filter (a push of over 1,000 commits, or a diff
+    that timed out).
   - Examined Renovate's built-in `customManagers:dockerfileVersions` preset. Rejected: it captures `currentValue`
     only, so `XMRIG_COMMIT` would go stale and every bump PR would be red, as today.
   - Examined editing the shared preset. Rejected: it changes other repos. A repo-local override is enough.
@@ -277,8 +291,8 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
     - A missing `donate_level` fails `verify`.
     - A failed `tag` job after publishing turns the run red. The next Dockerfile change publishes again under a new
       date. Accepted below.
-    - A red `verify` on `main` publishes nothing. The next push re-evaluates, because "changed since last tag" is
-      still true. Self-healing.
+    - A red `verify` on `main` publishes nothing. The next push that changes the Dockerfile, or a
+      `workflow_dispatch` on `main`, re-evaluates, because "changed since last tag" is still true. Self-healing.
   - Leaks: the only resource acquired is the smoke-test container, already released by the existing
     `trap … EXIT`. No new resources.
 - **migrations**: N/A. No schema or data store. Release state lives in git tags, and the rollback below covers
@@ -374,10 +388,13 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
   rarer than that.
 - **Changes only to `config.json`, `NOTICE` or `LICENSE`** do not auto-publish. They ship with the next Dockerfile
   change or a manual tag push. Accepted to avoid a path list coupled to the `COPY` lines.
-- **A `tag` job failure after publishing** leaves an untagged release, so the next push to `main` publishes again.
-  `release` checks Docker Hub as well as git tags when it picks a name, so that image gets a `.N` name instead of
-  overwriting the untagged one (raised in review on #52). The result is one redundant image, and the red run flags
-  it. Accepted.
+- **A `tag` job failure after publishing** leaves an untagged release, so the next `main` push that changes the
+  Dockerfile, or a `workflow_dispatch` on `main`, publishes again. `release` checks Docker Hub as well as git tags
+  when it picks a name, so that image gets a `.N` name instead of overwriting the untagged one (raised in review on
+  #52). The result is one redundant image, and the red run flags it. Accepted.
+- **`main` pushes that leave the Dockerfile alone run no workflow** (the `paths` filter, user decision 2026-11-25).
+  Their `lint` and `verify` run on the pull request only, against the PR's merge commit; a direct push to `main`
+  runs neither. Accepted.
 - **No required status checks on `main`.** `platformAutomerge: false` makes Renovate itself check that CI is
   green. Enabling the disabled `main` ruleset with required checks would be defence in depth. It is not part of
   this plan (a repo setting, the user's call).
