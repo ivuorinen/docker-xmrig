@@ -157,7 +157,8 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
       and `pull_request` has no filter, so both run as before.
     - New job `release` (ubuntu-latest, timeout 5): checkout with `fetch-depth: 0` and
       `persist-credentials: false`, then a step `decide` that writes `publish`, `tag` and `create_tag` outputs:
-      - `refs/tags/*` → `publish=true`, `tag=$GITHUB_REF_NAME`, `create_tag=false`. The manual path is unchanged.
+      - `refs/tags/*` → `publish=true`, `tag` empty, `create_tag=false`. `merge` names the image from the ref, so
+        the manual path is unchanged.
       - `refs/heads/main` (push or `workflow_dispatch`):
         - `last=$(git describe --tags --abbrev=0 --match '[0-9]*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' HEAD)`.
         - If `git diff --quiet "$last" HEAD -- Dockerfile`, emit `::notice::no release: Dockerfile unchanged since
@@ -169,9 +170,12 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
       - Any git failure fails the job. It never falls through to "publish".
     - `build`: `needs: [verify, release]`, `if: needs.release.outputs.publish == 'true'`. This replaces
       `startsWith(github.ref, 'refs/tags/')`.
-    - `merge`: `needs: [build, release]`. metadata-action gets `tags: type=raw,value=${{ needs.release.outputs.tag }}`
-      and `flavor: latest=true`. These explicit tags also stop a `:main` tag being pushed. "Inspect image" reads
-      `needs.release.outputs.tag`.
+    - `merge`: `needs: [build, release]`. metadata-action gets two tag lines, `type=ref,event=tag` and
+      `type=raw,value=${{ needs.release.outputs.tag }}`, and `flavor: latest=true`. A tag push is named from the ref,
+      as before; an automatic release takes `release`'s name, and the empty name on a tag push is skipped. A manual
+      tag never reaches the `type=raw` line, where each line is parsed as CSV: a comma in a valid git tag would
+      replace the value, and a `"` would fail the parse (raised in review on #52). These explicit tags also stop a
+      `:main` tag being pushed. "Inspect image" reads the pushed name, `steps.meta.outputs.version`.
     - New job `tag`: `needs: [release, merge]`, `if: needs.release.outputs.create_tag == 'true'`.
       - `permissions: contents: write` is set on this job only; it holds no Docker Hub secrets.
       - Step: `gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${GITHUB_SHA}"`, with

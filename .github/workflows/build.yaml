@@ -283,8 +283,8 @@ jobs:
           create_tag=false
           case "$GITHUB_REF" in
             refs/tags/*)
+              # `tag` stays empty: `merge` names this image from the ref itself.
               publish=true
-              tag="$GITHUB_REF_NAME"
               ;;
             refs/heads/main)
               last="$(git describe --tags --abbrev=0 \
@@ -439,16 +439,24 @@ jobs:
           merge-multiple: true
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-      # Tags come from `release`, not from the git ref: metadata-action's defaults
-      # would tag a main push `:main`, and an automatic release's git tag does not
-      # exist yet at this point — the `tag` job creates it afterwards. `latest`
-      # follows every publish, the manual tag path included, as it did before.
+      # Explicit tags, not metadata-action's defaults, which would tag a main push
+      # `:main`. A pushed git tag is named from the ref by type=ref, as before
+      # this workflow published from main. An automatic release takes its name
+      # from `release` through type=raw, because its git tag does not exist yet
+      # (the `tag` job creates it afterwards). `release` leaves that name empty
+      # on a tag push, and metadata-action skips an empty value. A manual tag
+      # must never reach the type=raw line: each line is parsed as CSV, so a
+      # comma in a valid git tag (`v1,x`) starts a new field that replaces the
+      # value, and a `"` fails the parse. `latest` follows every publish, the
+      # manual tag path included, as it did before.
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY_IMAGE }}
-          tags: type=raw,value=${{ needs.release.outputs.tag }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=${{ needs.release.outputs.tag }}
           flavor: latest=true
       - name: Login to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
