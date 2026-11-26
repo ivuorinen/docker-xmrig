@@ -199,7 +199,8 @@ Work on a branch. Nothing is committed without an explicit instruction (user git
       - (a) HEAD = current `main`: `publish=true`, `tag=6.22.2-<today>`, `create_tag=true`.
       - (b) HEAD = the `6.22.2-2024-11-03` commit: `publish=false`.
       - (c) A local tag `6.22.2-<today>` exists and the Dockerfile changed after it: `tag=6.22.2-<today>.2`.
-      - (d) `GITHUB_REF=refs/tags/X`: `publish=true`, `tag=X`, `create_tag=false`.
+      - (d) `GITHUB_REF=refs/tags/X`: `publish=true`, `tag` empty, `create_tag=false`. `merge` names the image from
+        the ref.
       - (e) `GITHUB_REF=refs/pull/1/merge`: `publish=false`.
 
 5. **Unblock CI: move the alpine digest.** File: `Dockerfile:25`.
