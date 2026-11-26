@@ -18,3 +18,9 @@ indent_size = 2
 # rule above. Better an explicit exemption than a rule everyone knows is broken.
 [*.md]
 max_line_length = off
+
+# JSON Lines holds one record per line by definition, so a record cannot be
+# wrapped without breaking the format. docs/audit/findings/resolved.jsonl, the
+# nitpicker ledger, is the file this covers.
+[*.jsonl]
+max_line_length = off

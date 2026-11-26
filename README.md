@@ -207,13 +207,13 @@ are worth enabling only if you can grant what they need:
 
 1. `--cap-add SYS_RAWIO --device /dev/cpu` under Docker. No effect on arm64.
 2. **Docker:** host `vm.nr_hugepages` plus `--cap-add IPC_LOCK`.
-   **Kubernetes:** a node with pre-allocated hugepages, a
-   `resources.limits.hugepages-2Mi` entry, *and* `IPC_LOCK` added back to the
-   otherwise-dropped capability set. The shipped `deployment.yaml` does none of
-   these, so hugepages are off there — worth roughly 20-30% of RandomX hashrate.
-   Check for `huge pages 0%` in the `randomx allocated` log line to confirm.
+    **Kubernetes:** a node with pre-allocated hugepages, a
+    `resources.limits.hugepages-2Mi` entry, *and* `IPC_LOCK` added back to the
+    otherwise-dropped capability set. The shipped `deployment.yaml` does none of
+    these, so hugepages are off there — worth roughly 20-30% of RandomX hashrate.
+    Check for `huge pages 0%` in the `randomx allocated` log line to confirm.
 3. Built with `-DWITH_OPENCL=OFF -DWITH_CUDA=OFF`; adding those blocks to
-   `config.json` is silently ignored. Rebuild from source for GPU mining.
+    `config.json` is silently ignored. Rebuild from source for GPU mining.
 
 With enough memory, everything above degrades to a lower hashrate rather than
 failing. Memory is the exception — see the table at the top of this section.
@@ -330,6 +330,29 @@ Two things to know before you opt in:
   Rotate it on the host (`logrotate`). On Kubernetes the `emptyDir` `sizeLimit`
   makes the kubelet evict this pod rather than fill the node; raise it alongside
   `resources.limits.ephemeral-storage`, not on its own.
+
+## Releases
+
+Images are published to Docker Hub as `<xmrig version>-<YYYY-MM-DD>`, for
+example `6.22.2-2024-11-03`, and every publish also moves `:latest`.
+
+Publishing is automatic. Renovate watches upstream
+[xmrig/xmrig](https://github.com/xmrig/xmrig) and the Alpine base image, and
+opens a pull request for each new release. Once CI shows that the `donate.h`
+patch still applies and that the image builds, runs as shipped and passes the
+vulnerability scan, Renovate merges the pull request, and the merge publishes a
+new image. That includes **new major xmrig versions**: `:latest` moves to them
+without review, which is why the Kubernetes steps above recommend pinning a
+released tag.
+
+- Only a merge that changes the `Dockerfile` publishes. Documentation changes
+  and GitHub Actions updates do not.
+- A second release of the same xmrig version on the same day gets a `.2`, `.3`,
+  … suffix (`6.27.0-2026-11-25.2`), so a published tag never changes.
+- Each release is also a git tag in this repository, on the commit the image was
+  built from; the image's `org.opencontainers.image.revision` label names that
+  commit as well.
+- Pushing a git tag by hand still publishes an image under that tag.
 
 ## Disclaimer
 

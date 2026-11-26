@@ -8,13 +8,27 @@ on:
       - main
     tags:
       - "*"
+    # A push to main runs this workflow, and so can publish, only when it
+    # changes the Dockerfile: merging documentation or GitHub Actions updates
+    # releases nothing. Those changes are linted and verified on their pull
+    # request, which has no filter; a direct push to main that leaves the
+    # Dockerfile alone runs neither. GitHub does not apply path filters to tag
+    # pushes, so the manual tag path is unaffected.
+    paths:
+      - Dockerfile
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
-  cancel-in-progress: true
+  # Only pull request runs are superseded. A main or tag run may be mid-release
+  # (per-platform digests pushed, manifest list or git tag not yet), and
+  # cancelling it there leaves a half-published release. Queued runs still
+  # collapse to the newest, so a burst of merges costs one extra run, not one
+  # run per merge.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# None of these jobs writes to the repository; the pipeline's real credential is
-# the Docker Hub token.
+# Read-only by default. The `tag` job alone is granted contents: write, to record
+# an automatic release as a git tag; the pipeline's other credential is the
+# Docker Hub token.
 permissions:
   contents: read
 
@@ -40,8 +54,13 @@ jobs:
       # `# shellcheck disable=SC2046` directive in the merge job assumes exists.
       # The release pipeline's shell is where a quoting mistake silently
       # mis-tags a published image, so it is worth gating.
+      #
+      # actionlint v1.7.12. The version sits here, not as a trailing `# v1.7.12`
+      # on the uses: line, because that line would then exceed .editorconfig's
+      # 120 columns; Renovate tracks a docker:// ref by its digest alone and
+      # never read that comment.
       - name: Lint workflows
-        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
         with:
           args: -color
       # The two manifests README tells users to apply verbatim were the only
@@ -58,8 +77,11 @@ jobs:
       # them, so a one-character typo in securityContext applies cleanly and the
       # pod runs unhardened. -strict is what turns that into a failure here;
       # without it kubeconform reports this file valid with the typo in place.
+      #
+      # kubeconform v0.8.0 — version noted here for the same reason as
+      # actionlint's above.
       - name: Validate Kubernetes manifests
-        uses: docker://ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e # v0.8.0
+        uses: docker://ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
         with:
           args: -strict -summary deployment.yaml
 
@@ -150,6 +172,19 @@ jobs:
             cat /tmp/summary.json
             exit 1
           }
+          # The donate.h patch, proven in the running binary rather than in the
+          # source text the builder stage greps. config.json asks for
+          # donate-level 0, but xmrig ignores any level below kMinimumDonateLevel
+          # and keeps kDefaultDonateLevel — so an unpatched binary reports 1 here
+          # and only a patched one reports 0. Renovate automerges xmrig bumps, so
+          # this is the check that stands between an upstream refactor of the
+          # donation code and a published image that donates. A missing field
+          # compares null == 0, which fails too.
+          jq -e '.donate_level == 0' /tmp/summary.json >/dev/null || {
+            echo "::error::donate_level is not 0 — the donate.h patch did not take effect"
+            cat /tmp/summary.json
+            exit 1
+          }
           # The container's own HEALTHCHECK command, read back out of the image
           # rather than restated here — a hardcoded copy is only verbatim until
           # someone edits the Dockerfile. Element 0 of .Config.Healthcheck.Test
@@ -200,10 +235,119 @@ jobs:
           ignore-unfixed: true
           severity: CRITICAL,HIGH
 
+  # Decides whether this run publishes, and under which tag. Runs beside
+  # `verify` rather than after it: it reads only git and Docker Hub's tag list,
+  # and `build` needs both.
+  #
+  # - A pushed git tag publishes under that tag (the manual path).
+  # - main publishes when the Dockerfile changed since the last release tag,
+  #   i.e. Renovate merged an xmrig bump or a base-image digest bump. The tag is
+  #   <xmrig version without v>-<UTC date>, with .2, .3, ... appended while that
+  #   name is taken as a git tag or on Docker Hub, so a published tag never
+  #   changes under anyone pinning it.
+  #   "Since the last release tag" rather than "in this push" makes it
+  #   self-healing: a run that failed verify or stopped early leaves no tag, so
+  #   the next main push that changes the Dockerfile, or a workflow_dispatch on
+  #   main, publishes instead. The `paths` filter on `push` already keeps other
+  #   main pushes from running at all; this diff still decides for
+  #   workflow_dispatch, and for the runs GitHub starts despite the filter (a
+  #   push of over 1,000 commits, or a diff that timed out).
+  # - Anything else (pull requests, other branches) publishes nothing.
+  #
+  # The tag, date included, is computed once, here, and read by both `merge` and
+  # `tag`, so a run that crosses midnight UTC cannot give the image and its git
+  # tag different dates. The build legs push by digest and never see it.
+  # Only the Dockerfile is compared: also listing config.json, NOTICE and
+  # LICENSE would be a second list to keep in step with its COPY lines. A change
+  # to those alone ships with the next release, or with a manual tag push.
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+      tag: ${{ steps.decide.outputs.tag }}
+      create_tag: ${{ steps.decide.outputs.create_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history and every tag: `git describe` has to reach the last
+          # release tag, and the collision check has to see every tag name.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide
+        id: decide
+        run: |
+          publish=false
+          tag=
+          create_tag=false
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              # `tag` stays empty: `merge` names this image from the ref itself.
+              publish=true
+              ;;
+            refs/heads/main)
+              last="$(git describe --tags --abbrev=0 \
+                --match '[0-9]*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' HEAD)" || {
+                echo "::error::no release tag reachable from HEAD"; exit 1; }
+              # git diff --quiet exits 0 (same), 1 (differs) or >1 (error). An
+              # `if` would read an error as "differs" and publish, so every code
+              # is handled explicitly.
+              rc=0
+              git diff --quiet "$last" HEAD -- Dockerfile || rc=$?
+              case "$rc" in
+                0)
+                  echo "::notice::no release: Dockerfile unchanged since ${last}"
+                  ;;
+                1)
+                  v="$(sed -n 's/^ARG XMRIG_VERSION="v\{0,1\}\([^"]*\)"/\1/p' Dockerfile)"
+                  test -n "$v" || { echo "::error::could not read XMRIG_VERSION from Dockerfile"; exit 1; }
+                  base="${v}-$(date -u +%F)"
+                  tag="$base"
+                  n=1
+                  # A name is taken when its git tag exists OR Docker Hub already
+                  # has it. Git alone misses one case: a `tag` job that failed after
+                  # `merge` published leaves the image without its git tag, and the
+                  # next same-day release would overwrite it. Any Hub answer other
+                  # than 200 or 404 fails the job, as a git error does.
+                  hub="https://hub.docker.com/v2/namespaces/${REGISTRY_IMAGE%%/*}"
+                  hub="${hub}/repositories/${REGISTRY_IMAGE#*/}/tags"
+                  taken() {
+                    git rev-parse -q --verify "refs/tags/$1" >/dev/null && return 0
+                    code="$(curl -sS --retry 3 --max-time 20 -o /dev/null -w '%{http_code}' "${hub}/$1")" ||
+                      code=000
+                    case "$code" in
+                      200) return 0 ;;
+                      404) return 1 ;;
+                      *) echo "::error::Docker Hub lookup of $1 failed (HTTP ${code})"; exit 1 ;;
+                    esac
+                  }
+                  while taken "$tag"; do
+                    n=$((n + 1))
+                    tag="${base}.${n}"
+                  done
+                  publish=true
+                  create_tag=true
+                  echo "::notice::publishing ${tag}: Dockerfile changed since ${last}"
+                  ;;
+                *)
+                  echo "::error::git diff ${last} HEAD failed (exit ${rc})"
+                  exit 1
+                  ;;
+              esac
+              ;;
+          esac
+          {
+            echo "publish=${publish}"
+            echo "tag=${tag}"
+            echo "create_tag=${create_tag}"
+          } >> "$GITHUB_OUTPUT"
+
   build:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: needs.release.outputs.publish == 'true'
     needs:
       - verify
+      - release
     strategy:
       fail-fast: false
       matrix:
@@ -284,6 +428,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs:
+      - release
       - build
     steps:
       - name: Download digests
@@ -294,11 +439,25 @@ jobs:
           merge-multiple: true
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      # Explicit tags, not metadata-action's defaults, which would tag a main push
+      # `:main`. A pushed git tag is named from the ref by type=ref, as before
+      # this workflow published from main. An automatic release takes its name
+      # from `release` through type=raw, because its git tag does not exist yet
+      # (the `tag` job creates it afterwards). `release` leaves that name empty
+      # on a tag push, and metadata-action skips an empty value. A manual tag
+      # must never reach the type=raw line: each line is parsed as CSV, so a
+      # comma in a valid git tag (`v1,x`) starts a new field that replaces the
+      # value, and a `"` fails the parse. `latest` follows every publish, the
+      # manual tag path included, as it did before.
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=${{ needs.release.outputs.tag }}
+          flavor: latest=true
       - name: Login to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -311,12 +470,41 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+      # The pushed name, not the release output: metadata-action rewrites
+      # characters a Docker tag cannot hold, so a manual git tag such as
+      # `v1+x` is published as `v1-x`.
       - name: Inspect image
+        env:
+          TAG: ${{ steps.meta.outputs.version }}
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect "${REGISTRY_IMAGE}:${TAG}"
 
+  # Records an automatic release as a git tag on the commit it was built from,
+  # which is also what the next run's `release` job compares against. A job of
+  # its own so that contents: write sits beside no Docker Hub secret. Pushed with
+  # GITHUB_TOKEN, so it starts no workflow run of its own — intended, because
+  # the image is already published.
+  tag:
+    if: needs.release.outputs.create_tag == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - release
+      - merge
+    permissions:
+      contents: write
+    steps:
+      - name: Create git tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${GITHUB_SHA}"
+
+  # Gated by `needs: merge` alone: a job without an explicit status check
+  # runs only when every need succeeded, so it is skipped whenever nothing
+  # was published.
   update_description:
-    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs:

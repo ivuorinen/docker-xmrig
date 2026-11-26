@@ -1,19 +1,19 @@
 # Stage 1: Build stage
-# renovate: datasource=github-tags depName=xmrig/xmrig
-ARG XMRIG_VERSION="v6.22.2"
 
-# The commit XMRIG_VERSION resolved to when it was pinned. A git tag is a MUTABLE
-# pointer — upstream can move it, and every later build of this unchanged
-# Dockerfile would then compile different source under the same version label,
-# which neither --branch nor the version smoke test can detect. This is the pin
-# that actually holds.
+# The xmrig source pin: the upstream tag, and the commit that tag resolved to. A
+# git tag is a MUTABLE pointer — upstream can move it, and every later build of
+# this unchanged Dockerfile would then compile different source under the same
+# version label, which neither --branch nor the version smoke test can detect.
+# XMRIG_COMMIT is the pin that actually holds.
 #
-# Renovate bumps XMRIG_VERSION from the annotation above; it does NOT touch this
-# line — no annotation and no customManager covers it. So every xmrig bump PR is
-# red by construction: the rev-parse check below fails, prints the tag's real
-# commit, and a maintainer pastes it here on the same branch. The SHA is already
-# in the failed build log ("got <sha>") — no lookup needed. To check by hand:
+# Renovate updates BOTH lines in one PR, through the customManagers entry in
+# .github/renovate.json: it looks the new tag up on GitHub and writes the commit
+# that tag points to into XMRIG_COMMIT. That manager matches the two lines as one
+# block, so keep them adjacent, in this order, with nothing between them. The
+# rev-parse check in the builder stage therefore fails only when a tag moved
+# after Renovate recorded its commit. To check by hand:
 #   git ls-remote https://github.com/xmrig/xmrig.git 'refs/tags/<tag>^{}' 'refs/tags/<tag>'
+ARG XMRIG_VERSION="v6.22.2"
 ARG XMRIG_COMMIT="f9e990d0f0167c92d09334213ac6950033bbbba1"
 
 # Digest-pinned: `alpine:3.24` alone is a floating tag, republished on every
@@ -22,7 +22,7 @@ ARG XMRIG_COMMIT="f9e990d0f0167c92d09334213ac6950033bbbba1"
 # xmrig is compiled here and the bare binary is copied into the runtime stage, so
 # if the two stages ever resolved to different bases the binary would link
 # against a different musl/libuv/hwloc/OpenSSL than the one that runs it.
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS base
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS base
 
 FROM base AS builder
 

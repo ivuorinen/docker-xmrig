@@ -2,5 +2,69 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>ivuorinen/renovate-config"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": [
+        "Track the xmrig source pin in the Dockerfile: the tag AND the commit it resolved to, in one PR. ",
+        "The github-tags datasource returns each tag's commit as its digest, so capturing XMRIG_COMMIT as ",
+        "currentDigest makes Renovate rewrite it alongside XMRIG_VERSION. Neither existing manager does this: ",
+        "the preset's Dockerfile manager reads only single-line 'ENV *_VERSION=... # datasource/dep' pins, and ",
+        "the built-in customManagers:dockerfileVersions preset captures currentValue only, so a version-only ",
+        "bump would leave XMRIG_COMMIT stale and fail the builder stage's rev-parse check. datasource and ",
+        "depName are templates rather than captures from a comment, because the match string has to stay ",
+        "within the 120-column .editorconfig limit and JSON has no string concatenation."
+      ],
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/"
+      ],
+      "matchStrings": [
+        "ARG XMRIG_VERSION=\"(?<currentValue>[^\"]+)\"\\nARG XMRIG_COMMIT=\"(?<currentDigest>[0-9a-f]{40})\""
+      ],
+      "datasourceTemplate": "github-tags",
+      "depNameTemplate": "xmrig/xmrig"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": [
+        "Re-enable, and automerge, digest updates for the Dockerfile base image. The preset disables digest ",
+        "updates for everything except GitHub Actions, which froze the alpine:3.24@sha256 pin while fixed ",
+        "CVEs accumulated in its packages until Trivy failed every build. Every update still has to pass ",
+        "verify (build, smoke tests, Trivy) before it merges."
+      ],
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "enabled": true,
+      "automerge": true
+    },
+    {
+      "description": [
+        "Automerge every xmrig update, majors included. Merging one publishes '<version>-<date>' and moves ",
+        "'latest' (see the release job in .github/workflows/build.yaml); verify has to pass first."
+      ],
+      "matchPackageNames": [
+        "xmrig/xmrig"
+      ],
+      "automerge": true
+    },
+    {
+      "description": [
+        "Dockerfile updates automerge only as a PR, and only once Renovate itself has seen every check pass. ",
+        "The preset's automergeType 'branch' would merge without CI, because build.yaml does not run on ",
+        "Renovate branch pushes. platformAutomerge is off because main has no required status checks, so ",
+        "GitHub-native automerge could merge before verify finishes, or after it fails."
+      ],
+      "matchFileNames": [
+        "Dockerfile"
+      ],
+      "automergeType": "pr",
+      "platformAutomerge": false
+    }
   ]
 }

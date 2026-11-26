@@ -15,7 +15,7 @@ upstream XMRig, and ships reference manifests for consuming it.
 | Build | `Dockerfile`, `.dockerignore`, `.hadolint.yaml` | Two-stage build: compile upstream XMRig in a builder stage, copy the bare binary into a minimal runtime stage |
 | Runtime config | `config.json` | The default config baked to `/etc/xmrig/config.json`; intended to be replaced by consumers |
 | Deployment references | `deployment.yaml`, `docker-compose.yml`, the `docker run` recipe in `README.md` | Three independent consumers of the image contract |
-| Pipeline | `.github/workflows/build.yaml` | `lint` → `verify` (gate) → `build` (per-platform, tags only) → `merge` (manifest list) → `update_description` |
+| Pipeline | `.github/workflows/build.yaml`, `.github/renovate.json` | `lint` → `verify` (gate), beside `release` (decides: a pushed tag, or main with the Dockerfile changed since the last release tag) → `build` (per-platform) → `merge` (manifest list, `<version>-<date>` + `latest`) → `tag` (git tag, the only job with `contents: write`) and `update_description`. Renovate feeds it: xmrig tag+commit and alpine digest PRs, automerged once `verify` passes |
 | Licence surface | `LICENSE`, `NOTICE` | MIT packaging over a GPL-3.0 conveyed work |
 
 ## The load-bearing invariant
