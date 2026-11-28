@@ -13,8 +13,8 @@
 # rev-parse check in the builder stage therefore fails only when a tag moved
 # after Renovate recorded its commit. To check by hand:
 #   git ls-remote https://github.com/xmrig/xmrig.git 'refs/tags/<tag>^{}' 'refs/tags/<tag>'
-ARG XMRIG_VERSION="v6.22.2"
-ARG XMRIG_COMMIT="f9e990d0f0167c92d09334213ac6950033bbbba1"
+ARG XMRIG_VERSION="v6.27.0"
+ARG XMRIG_COMMIT="be97bc8f864fdd94b1c336c8ee62136578f0b080"
 
 # Digest-pinned: `alpine:3.24` alone is a floating tag, republished on every
 # 3.24.x patch, so the same commit would otherwise build different images.
